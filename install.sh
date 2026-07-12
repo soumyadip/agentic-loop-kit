@@ -130,7 +130,7 @@ PY
 
 log "done. Next steps:"
 log "  1. Review $target/loop/loop.config.sh"
-log "  2. Sharpen the adversarial red-team mandate in loop/*_review_prompt.tpl.md (search for the"
+log "  2. Sharpen the adversarial red-team mandate in loop/review_prompt.tpl.md (search for the"
 log "     TODO comment) once you've seen a few real bugs slip through — that's where this kit's"
 log "     value compounds over time."
 log "  3. Make sure $target has a $principles_doc with working principles (TDD, architecture"

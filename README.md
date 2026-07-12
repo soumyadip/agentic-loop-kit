@@ -79,7 +79,8 @@ clobber settings you've already tuned.
    heading in it. Set to empty (`none` at the interactive prompt) if your
    project doesn't track milestones as a doc.
 5. **The red-team adversarial mandate** — *not* prompted for, because it's
-   not a fill-in-the-blank field. `loop/*_review_prompt.tpl.md` ship with
+   not a fill-in-the-blank field. `loop/review_prompt.tpl.md` (the single
+   template shared by all three checkers — see below) ships with
    a generic numbered mandate (mocked-vs-real dependencies, boundary/
    type-coercion bugs, auth fail-closed behavior, audit completeness, test
    reachability, injection, idempotency). Once your loop has caught a few
@@ -100,8 +101,10 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
   council.sh                the independent three-model advisory fan-out
   new_task.sh                scaffolds a new queue task file
   loop.config.sh.example     documents every LOOP_KIT_* setting
-  *_task_prompt.tpl.md       maker prompt template
-  *_review_prompt.tpl.md     one per checker (claude/codex/cursor)
+  task_prompt.tpl.md          single maker prompt template, shared by codex/claude/cursor
+  review_prompt.tpl.md        single review prompt template, shared by all three checkers —
+                               run.sh fills in one {{REVIEWER_MODE_NOTE}} line per CLI, that's
+                               the only thing that ever differed between them
   council_prompt.tpl.md      council member prompt template
   README.md                  operational docs, copied into the target repo as loop/README.md
 skills/

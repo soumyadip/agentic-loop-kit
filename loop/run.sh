@@ -178,8 +178,8 @@ is_backed_off() {
   [[ -n "$until_epoch" ]] && (( until_epoch > now ))
 }
 
-render() { # render TEMPLATE TASK_ID TASK_BODY_FILE BRANCH [FAILURE_FILE] [MAKER] [BREAK_ATTEMPTS]
-  local tpl="$1" task_id="$2" body_file="$3" branch="$4" failure_file="${5:-}" maker_name="${6:-codex}" break_attempts="${7:-1}"
+render() { # render TEMPLATE TASK_ID TASK_BODY_FILE BRANCH [FAILURE_FILE] [MAKER] [BREAK_ATTEMPTS] [REVIEWER_MODE_NOTE]
+  local tpl="$1" task_id="$2" body_file="$3" branch="$4" failure_file="${5:-}" maker_name="${6:-codex}" break_attempts="${7:-1}" reviewer_mode_note="${8:-}"
   local out body failure_block="" failure_content
   body=$(cat "$body_file")
   if [[ -n "$failure_file" && -s "$failure_file" ]]; then
@@ -196,6 +196,7 @@ render() { # render TEMPLATE TASK_ID TASK_BODY_FILE BRANCH [FAILURE_FILE] [MAKER
   out="${out//\{\{MAKER\}\}/$maker_name}"
   out="${out//\{\{BREAK_ATTEMPTS\}\}/$break_attempts}"
   out="${out//\{\{PREVIOUS_FAILURE_BLOCK\}\}/$failure_block}"
+  out="${out//\{\{REVIEWER_MODE_NOTE\}\}/$reviewer_mode_note}"
   # TASK_BODY can contain & and other sed-hostile chars; do it last with a literal-safe approach.
   # $out goes over stdin rather than argv: even with the cap above, a single shell argument has a
   # much lower effective limit than ARG_MAX suggests, and the previous argv-based version failed
@@ -334,7 +335,7 @@ run_task_pipeline() {
   while (( attempt <= MAX_RETRIES )); do
     attempt=$((attempt+1))
     local prompt_file="$task_log/attempt-$attempt-maker-prompt.md"
-    render "$ROOT/loop/codex_task_prompt.tpl.md" "$task_id" "$task_file" "$branch" "$failure_file" > "$prompt_file"
+    render "$ROOT/loop/task_prompt.tpl.md" "$task_id" "$task_file" "$branch" "$failure_file" > "$prompt_file"
 
     local backoff_scan_file="" maker_final maker_status
     if [[ "$maker" == "claude" ]]; then
@@ -432,13 +433,17 @@ run_task_pipeline() {
       *)      reviewer="claude" ;;  # codex (default maker) is reviewed by claude
     esac
 
+    # One shared review_prompt.tpl.md for all three reviewers (see run.sh's render()) — the only
+    # thing that actually differs between them is how each CLI's read-only mode gets described,
+    # which is what REVIEWER_MODE_NOTE below captures per reviewer.
     local review_prompt review_out review_backoff_file
     if [[ "$reviewer" == "codex" ]]; then
       log "  $task_id attempt $attempt: codex review ($maker was the maker)"
       review_prompt="$task_log/attempt-$attempt-codex-review-prompt.md"
       review_out="$task_log/attempt-$attempt-codex-review.md"
       local review_events="$task_log/attempt-$attempt-codex-review.jsonl"
-      render "$ROOT/loop/codex_review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" > "$review_prompt"
+      local codex_mode_note="Treat this as a read-only review pass: you may run build/lint/test/\`git diff\` commands to verify claims, but do not edit any files or make any commits."
+      render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$codex_mode_note" > "$review_prompt"
       local codex_review_args=(exec review --base "$BASE_BRANCH" --json -o "$review_out")
       [[ -n "$CODEX_MODEL" ]] && codex_review_args+=(-m "$CODEX_MODEL")
       (cd "$worktree" && codex "${codex_review_args[@]}" - < "$review_prompt") > "$review_events" 2>&1
@@ -447,7 +452,8 @@ run_task_pipeline() {
       log "  $task_id attempt $attempt: cursor-agent review ($maker was the maker)"
       review_prompt="$task_log/attempt-$attempt-cursor-review-prompt.md"
       review_out="$task_log/attempt-$attempt-cursor-review.md"
-      render "$ROOT/loop/cursor_review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" > "$review_prompt"
+      local cursor_mode_note="You are running in \`plan\` mode: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
+      render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$cursor_mode_note" > "$review_prompt"
       local cursor_review_args=(-p --force --output-format text --mode plan --workspace "$worktree")
       [[ -n "$CURSOR_MODEL" ]] && cursor_review_args+=(--model "$CURSOR_MODEL")
       (cd "$worktree" && cursor-agent "${cursor_review_args[@]}" < "$review_prompt") > "$review_out" 2>&1
@@ -456,7 +462,8 @@ run_task_pipeline() {
       log "  $task_id attempt $attempt: claude review ($maker was the maker)"
       review_prompt="$task_log/attempt-$attempt-claude-prompt.md"
       review_out="$task_log/attempt-$attempt-claude-review.md"
-      render "$ROOT/loop/claude_review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" > "$review_prompt"
+      local claude_mode_note="You are running in \`plan\` permission mode: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
+      render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$claude_mode_note" > "$review_prompt"
       (cd "$worktree" && claude -p --model "$CLAUDE_MODEL" --permission-mode plan < "$review_prompt") > "$review_out" 2>&1
       review_backoff_file="$review_out"
     fi

@@ -1,5 +1,5 @@
 ---
-description: Get independent scope/spec opinions on a design or roadmap question from several separate LLMs (default: Codex, an opencode-hosted open model, and Claude — configurable via LOOP_KIT_COUNCIL_HARNESSES), gathered in parallel, then synthesize them. User-invoked only — it takes several minutes and multiple model calls.
+description: Get independent scope/spec opinions on a design or roadmap question from several separate LLMs (defaults to Codex, an opencode-hosted open model, and Claude — configurable via LOOP_KIT_COUNCIL_HARNESSES), gathered in parallel, then synthesize them. User-invoked only — it takes several minutes and multiple model calls.
 argument-hint: [question or topic to scope]
 disable-model-invocation: true
 ---

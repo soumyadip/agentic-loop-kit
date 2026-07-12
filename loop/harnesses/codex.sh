@@ -17,6 +17,12 @@ CODEX_MAKER_EFFORT_GNARLY="${LOOP_KIT_CODEX_MAKER_EFFORT_GNARLY:-high}"
 # the way the maker tiers above do — one flat model for every review.
 CODEX_CHECKER_MODEL="${LOOP_KIT_CODEX_CHECKER_MODEL:-$CODEX_MAKER_MODEL_DEFAULT}"
 
+# Model codex-as-council-member uses, and how long council.sh waits for it. Empty model means no
+# -m flag — let the codex CLI's own default decide, matching this adapter's original hardcoded
+# council behavior. LOOP_KIT_COUNCIL_TIMEOUT is shared across every council member's adapter.
+CODEX_COUNCIL_MODEL="${LOOP_KIT_CODEX_COUNCIL_MODEL:-}"
+CODEX_COUNCIL_TIMEOUT="${LOOP_KIT_COUNCIL_TIMEOUT:-900}"
+
 harness_maker_run() {
   local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5" model_override="${6:-}"
   local model effort="$CODEX_MAKER_EFFORT_DEFAULT"
@@ -61,4 +67,13 @@ harness_reviewer_run() {
 
 harness_reviewer_mode_note() {
   echo "Treat this as a read-only review pass: you may run build/lint/test/\`git diff\` commands to verify claims, but do not edit any files or make any commits."
+}
+
+harness_council_run() {
+  local prompt_file="$1" output_file="$2" model_override="${3:-}"
+  local model="${model_override:-$CODEX_COUNCIL_MODEL}"
+  echo "  codex exec council${model:+ ($model)}" >&2
+  local args=(exec -s read-only -C "$ROOT")
+  [[ -n "$model" ]] && args+=(-m "$model")
+  timeout "$CODEX_COUNCIL_TIMEOUT" codex "${args[@]}" - < "$prompt_file" > "$output_file" 2>&1
 }

@@ -16,6 +16,13 @@ HARNESS_NAME="cursor"
 CURSOR_MODEL="${LOOP_KIT_CURSOR_MODEL:-grok-4.5-high}"
 CURSOR_MAKER_TIMEOUT="${LOOP_KIT_CURSOR_MAKER_TIMEOUT:-900}"
 
+# cursor-as-council-member reuses CURSOR_MODEL by default (override with
+# LOOP_KIT_CURSOR_COUNCIL_MODEL if you want the council seat on a different model than the
+# maker/checker rotation). LOOP_KIT_COUNCIL_TIMEOUT is shared across every council member's
+# adapter.
+CURSOR_COUNCIL_MODEL="${LOOP_KIT_CURSOR_COUNCIL_MODEL:-$CURSOR_MODEL}"
+CURSOR_COUNCIL_TIMEOUT="${LOOP_KIT_COUNCIL_TIMEOUT:-900}"
+
 harness_maker_run() {
   local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5" model_override="${6:-}"
   local model="${model_override:-$CURSOR_MODEL}"
@@ -40,4 +47,13 @@ harness_reviewer_run() {
 
 harness_reviewer_mode_note() {
   echo "You are running in \`plan\` mode: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
+}
+
+harness_council_run() {
+  local prompt_file="$1" output_file="$2" model_override="${3:-}"
+  local model="${model_override:-$CURSOR_COUNCIL_MODEL}"
+  echo "  cursor-agent council${model:+ ($model)}" >&2
+  local args=(-p --force --output-format text --mode plan --workspace "$ROOT")
+  [[ -n "$model" ]] && args+=(--model "$model")
+  (cd "$ROOT" && timeout "$CURSOR_COUNCIL_TIMEOUT" cursor-agent "${args[@]}" < "$prompt_file") > "$output_file" 2>&1
 }

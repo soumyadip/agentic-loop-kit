@@ -46,6 +46,13 @@ reorder them, repeat one with different pinned models, or add a new harness
 against that interface — `loop/new_harness.sh <name>` scaffolds the file
 for you.
 
+`council.sh` (see below) reuses the exact same adapter files and member-spec
+syntax through a fourth function, `harness_council_run`, but is configured
+independently via `LOOP_KIT_COUNCIL_HARNESSES` — it's a different job
+(several models answering one question in parallel, no cross-visibility,
+no ring, no ≥2/distinctness requirement) from the maker/checker rotation
+above, so the two lists don't have to match.
+
 ## Prerequisites
 
 The loop only orchestrates CLIs it doesn't ship — install and authenticate
@@ -54,11 +61,13 @@ whichever of these you intend to use as makers/checkers:
 - [`codex`](https://github.com/openai/codex) — built-in harness
 - [`claude`](https://claude.com/claude-code) — built-in harness
 - [`cursor-agent`](https://cursor.com/cli) — built-in harness
-- [`opencode`](https://opencode.ai) — optional, only used by `council.sh`'s third seat (deliberately not part of the maker/checker rotation, see `loop/README.md`)
+- [`opencode`](https://opencode.ai) — optional, ships a council-only adapter (used by `council.sh`'s default rotation); its maker/checker functions are left as TODO stubs, see `loop/README.md`
 
-You don't need all three built-in harnesses on day one — only whichever
-ones you list in `LOOP_KIT_HARNESSES` (install.sh asks). A 2-harness
-rotation (e.g. `codex claude`) only needs those two CLIs installed.
+You don't need all three maker/checker built-in harnesses on day one —
+only whichever ones you list in `LOOP_KIT_HARNESSES` (install.sh asks). A
+2-harness rotation (e.g. `codex claude`) only needs those two CLIs
+installed. Separately, `LOOP_KIT_COUNCIL_HARNESSES` (default `codex
+opencode claude`) only needs whichever CLIs it names.
 
 Also needed: `python3` (template rendering, backoff-timestamp parsing),
 `git` (worktrees — this is load-bearing, not optional), and `bash` 4+.
@@ -160,7 +169,8 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
                                {{REVIEWER_MODE_NOTE}} line per harness into either one
   council_prompt.tpl.md      council member prompt template
   harnesses/
-    codex.sh, claude.sh, cursor.sh   built-in adapters
+    codex.sh, claude.sh, cursor.sh   built-in maker/checker/council adapters
+    opencode.sh                      council-only adapter (maker/checker left as TODO stubs)
     TEMPLATE.sh.example              the adapter interface, documented
   README.md                  operational docs, copied into the target repo as loop/README.md
 skills/

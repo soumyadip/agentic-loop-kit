@@ -1,39 +1,61 @@
 #!/usr/bin/env bash
-# Fan a single question out to three independent LLMs (Codex, an opencode-hosted open
-# model, and Claude) in parallel and save each answer to disk. This is the read-only
-# counterpart to loop/run.sh's maker/checker loop: no merging, no verdicts, no state
-# machine — it exists to gather independent opinions for a human (or a follow-up Claude
-# session) to synthesize into a spec/ADR/roadmap change, the way T034-T036 and ADR-014/015
-# were produced.
+# Fan a single question out to several independent LLMs in parallel and save each answer to
+# disk. This is the read-only counterpart to loop/run.sh's maker/checker loop: no merging, no
+# verdicts, no state machine — it exists to gather independent opinions for a human (or a
+# follow-up Claude session) to synthesize into a spec/ADR/roadmap change, the way T034-T036 and
+# ADR-014/015 were produced.
 #
 # Usage:
 #   loop/council.sh <question-file.md> [output-dir]
 #
-# <question-file.md> is a plain markdown file containing the question you want all three
-# members to answer independently — write it the way you'd write a loop/queue task file:
-# concrete, self-contained, and naming exactly which repo docs the member should read
-# before answering. See loop/council_prompt.tpl.md for the wrapper every member actually
-# receives (your question file is substituted into it, not sent alone).
+# <question-file.md> is a plain markdown file containing the question you want every member to
+# answer independently — write it the way you'd write a loop/queue task file: concrete, self-
+# contained, and naming exactly which repo docs the member should read before answering. See
+# loop/council_prompt.tpl.md for the wrapper every member actually receives (your question file
+# is substituted into it, not sent alone).
 #
-# Output lands in loop/council/log/<timestamp>-<slug>/{codex,opencode,claude}.md (or
-# [output-dir] if given). Nothing here writes to specs/, docs/, or any tracked file —
-# reconciling the three answers into an ADR/spec/roadmap change is a separate, deliberate
-# step, same as it was for ADR-014/015.
+# Who's asked is config, not code: LOOP_KIT_COUNCIL_HARNESSES in loop.config.sh (space-separated
+# *members*, same "harness" or "harness:model" syntax as LOOP_KIT_HARNESSES — see run.sh's
+# HARNESSES comment). Default: codex opencode claude. Each member's harness portion needs a
+# loop/harnesses/<name>.sh adapter implementing harness_council_run (see
+# loop/harnesses/TEMPLATE.sh.example) — this kit's codex/claude/cursor/opencode adapters all do.
+# Unlike LOOP_KIT_HARNESSES, members here don't need to be distinct or even >=2 of them — there's
+# no self-review adjacency concern for an independent-opinions fan-out, just diminishing value
+# in asking the same member twice.
+#
+# COUNCIL_SKIP="member member ..." (space-separated, matching entries in LOOP_KIT_COUNCIL_HARNESSES
+# exactly) skips those members for this run without editing config, e.g. COUNCIL_SKIP="opencode".
+#
+# Output lands in loop/council/log/<timestamp>-<slug>/<member>.md (colons in a pinned member spec
+# become dashes in the filename), or [output-dir] if given. Nothing here writes to specs/, docs/,
+# or any tracked file — reconciling the answers into an ADR/spec/roadmap change is a separate,
+# deliberate step, same as it was for ADR-014/015.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TPL="$ROOT/loop/council_prompt.tpl.md"
 
-CODEX_MODEL="${COUNCIL_CODEX_MODEL:-}"
-OPENCODE_MODEL="${COUNCIL_OPENCODE_MODEL:-nvidia/z-ai/glm-5.2}"
-CLAUDE_MODEL="${COUNCIL_CLAUDE_MODEL:-sonnet}"
-TIMEOUT="${COUNCIL_TIMEOUT:-900}"
-SKIP_CODEX="${COUNCIL_SKIP_CODEX:-0}"
-SKIP_OPENCODE="${COUNCIL_SKIP_OPENCODE:-0}"
-SKIP_CLAUDE="${COUNCIL_SKIP_CLAUDE:-0}"
-
 log()  { echo "[council] $*"; }
 die()  { echo "[council] STOP: $*" >&2; exit 1; }
+
+[[ -f "$ROOT/loop/loop.config.sh" ]] && source "$ROOT/loop/loop.config.sh"
+
+read -ra COUNCIL_MEMBERS <<< "${LOOP_KIT_COUNCIL_HARNESSES:-codex opencode claude}"
+(( ${#COUNCIL_MEMBERS[@]} >= 1 )) || die "LOOP_KIT_COUNCIL_HARNESSES is empty — nothing to ask"
+
+member_harness() { echo "${1%%:*}"; }
+member_model() { [[ "$1" == *:* ]] && echo "${1#*:}" || echo ""; }
+
+for m in "${COUNCIL_MEMBERS[@]}"; do
+  [[ -f "$ROOT/loop/harnesses/$(member_harness "$m").sh" ]] || die "no adapter at loop/harnesses/$(member_harness "$m").sh for member '$m' listed in LOOP_KIT_COUNCIL_HARNESSES — see loop/harnesses/TEMPLATE.sh.example"
+done
+
+read -ra SKIP <<< "${COUNCIL_SKIP:-}"
+is_skipped() {
+  local m="$1" s
+  for s in "${SKIP[@]}"; do [[ "$s" == "$m" ]] && return 0; done
+  return 1
+}
 
 question_file="${1:-}"
 [[ -z "$question_file" ]] && die "usage: loop/council.sh <question-file.md> [output-dir]"
@@ -54,40 +76,31 @@ PY
 
 log "question: $question_file"
 log "output dir: $out_dir"
+log "members: ${COUNCIL_MEMBERS[*]}"
 
 pids=()
+launched=()
 
-if [[ "$SKIP_CODEX" != "1" ]]; then
-  log "launching codex ($([[ -n "$CODEX_MODEL" ]] && echo "$CODEX_MODEL" || echo "default"))..."
-  ( codex_args=(exec -s read-only -C "$ROOT")
-    [[ -n "$CODEX_MODEL" ]] && codex_args+=(-m "$CODEX_MODEL")
-    timeout "$TIMEOUT" codex "${codex_args[@]}" - < "$rendered" > "$out_dir/codex.md" 2>&1 ) &
-  pids+=($!)
-else
-  log "skipping codex (COUNCIL_SKIP_CODEX=1)"
-fi
-
-if [[ "$SKIP_OPENCODE" != "1" ]]; then
-  if command -v opencode > /dev/null 2>&1; then
-    log "launching opencode ($OPENCODE_MODEL)..."
-    ( cd "$ROOT" && timeout "$TIMEOUT" opencode run --auto --agent plan -m "$OPENCODE_MODEL" < "$rendered" > "$out_dir/opencode.md" 2>&1 ) &
-    pids+=($!)
-  else
-    log "skipping opencode (not installed)"
+for member in "${COUNCIL_MEMBERS[@]}"; do
+  if is_skipped "$member"; then
+    log "skipping $member (COUNCIL_SKIP)"
+    continue
   fi
-else
-  log "skipping opencode (COUNCIL_SKIP_OPENCODE=1)"
-fi
-
-if [[ "$SKIP_CLAUDE" != "1" ]]; then
-  log "launching claude ($CLAUDE_MODEL)..."
-  ( cd "$ROOT" && timeout "$TIMEOUT" claude -p --model "$CLAUDE_MODEL" --permission-mode plan < "$rendered" > "$out_dir/claude.md" 2>&1 ) &
+  harness="$(member_harness "$member")"
+  model="$(member_model "$member")"
+  # Re-source the right adapter immediately before each launch, same as run.sh — a background
+  # subshell forked with `( ... ) &` captures the function definitions in effect at fork time, so
+  # this is safe even though the next loop iteration may re-source a different adapter into the
+  # same function names in this parent shell.
+  source "$ROOT/loop/harnesses/$harness.sh"
+  out_file="$out_dir/${member//:/-}.md"
+  log "launching $member..."
+  ( harness_council_run "$rendered" "$out_file" "$model" ) &
   pids+=($!)
-else
-  log "skipping claude (COUNCIL_SKIP_CLAUDE=1)"
-fi
+  launched+=("$member")
+done
 
-[[ ${#pids[@]} -eq 0 ]] && die "all three members skipped — nothing to run"
+[[ ${#pids[@]} -eq 0 ]] && die "every member was skipped — nothing to run"
 
 fail=0
 for pid in "${pids[@]}"; do
@@ -96,7 +109,8 @@ done
 
 log "done (some members may have failed non-zero — check each file below regardless, a"
 log "non-zero exit doesn't mean the answer is unusable, and 0 doesn't guarantee it is)"
-for f in "$out_dir"/codex.md "$out_dir"/opencode.md "$out_dir"/claude.md; do
+for member in "${launched[@]}"; do
+  f="$out_dir/${member//:/-}.md"
   [[ -f "$f" ]] && log "  $f"
 done
 log "next step is manual/Claude synthesis — this script only gathers opinions, it does not reconcile them"

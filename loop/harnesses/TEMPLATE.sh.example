@@ -36,6 +36,17 @@
 #     {{REVIEWER_MODE_NOTE}} token so the reviewer model has an accurate description of its own
 #     operating constraints for this specific CLI.
 #
+#   harness_council_run PROMPT_FILE OUTPUT_FILE MODEL_OVERRIDE
+#     Optional — only required if this harness appears in LOOP_KIT_COUNCIL_HARNESSES (see
+#     council.sh). Run this harness's CLI in read-only/plan mode against $ROOT (not a worktree —
+#     council questions aren't diffs, there's nothing to check out) and write the answer to
+#     OUTPUT_FILE. council.sh runs every configured member in parallel with no visibility into
+#     each other's answers, so this has no BASE_BRANCH/COMPLEXITY to react to, unlike the reviewer
+#     function above — just the question in PROMPT_FILE. MODEL_OVERRIDE behaves the same as the
+#     other two functions. If you don't need this harness in the council, it's fine to leave this
+#     as the TODO stub below — nothing calls it unless the harness is actually listed in
+#     LOOP_KIT_COUNCIL_HARNESSES.
+#
 # Available to every function without needing to be passed in: $ROOT (the main repo root — use
 # this for anything that needs to reach outside the worktree, e.g. a worktree's .git metadata,
 # since a worktree's index/HEAD lock lives under $ROOT/.git/worktrees/<name>/, outside the

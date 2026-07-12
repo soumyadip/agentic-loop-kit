@@ -48,6 +48,10 @@ terminal, or fall back to the default shown when it isn't):
   --codex-model NAME         default model for bare "codex" entries  (default: gpt-5.6-terra)
   --claude-model NAME        default model for bare "claude" entries (default: sonnet)
   --cursor-model NAME        default model for bare "cursor" entries (default: grok-4.5-high)
+  --council-harnesses "a b"  space-separated members council.sh asks independently — same
+                              "harness"/"harness:model" syntax as --harnesses, but no >=2 or
+                              distinctness requirement (no self-review adjacency to protect)
+                                                                (default: codex opencode claude)
   --non-interactive          never prompt; use flags/defaults only
   --force                    overwrite an existing loop/loop.config.sh in the target
 EOF
@@ -67,6 +71,7 @@ harnesses="$BUILTIN_HARNESSES"
 codex_model="gpt-5.6-terra"
 claude_model="sonnet"
 cursor_model="grok-4.5-high"
+council_harnesses="codex opencode claude"
 non_interactive=0
 force=0
 
@@ -82,6 +87,7 @@ while [[ $# -gt 0 ]]; do
     --codex-model) codex_model="$2"; shift 2 ;;
     --claude-model) claude_model="$2"; shift 2 ;;
     --cursor-model) cursor_model="$2"; shift 2 ;;
+    --council-harnesses) council_harnesses="$2"; shift 2 ;;
     --non-interactive) non_interactive=1; shift ;;
     --force) force=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -119,6 +125,8 @@ if [[ "$non_interactive" != 1 && -t 0 ]]; then
       *) log "  '$h' has no built-in adapter — you'll need to run 'loop/new_harness.sh $h' in the target repo after install." ;;
     esac
   done
+  read -rp "Council members for design/scope questions (space-separated, same syntax, no >=2 requirement) [$council_harnesses]: " ans
+  council_harnesses="${ans:-$council_harnesses}"
 fi
 
 harness_count=0
@@ -156,11 +164,11 @@ cp "$KIT_ROOT"/skills/council/SKILL.md "$target/.claude/skills/council/SKILL.md"
 cp "$KIT_ROOT"/skills/new-task/SKILL.md "$target/.claude/skills/new-task/SKILL.md"
 chmod +x "$target"/loop/*.sh "$target"/loop/harnesses/*.sh
 
-# Warn (don't fail) about any selected member whose underlying harness isn't built in and hasn't
-# been scaffolded — the install still completes, but that member won't actually work until an
-# adapter exists.
+# Warn (don't fail) about any selected member — from either rotation — whose underlying harness
+# isn't built in and hasn't been scaffolded — the install still completes, but that member won't
+# actually work until an adapter exists.
 missing_adapters=()
-for h in $harnesses; do
+for h in $harnesses $council_harnesses; do
   [[ -f "$target/loop/harnesses/$(member_harness "$h").sh" ]] || missing_adapters+=("$h")
 done
 
@@ -197,6 +205,7 @@ done
         ;;
     esac
   done
+  echo "LOOP_KIT_COUNCIL_HARNESSES=\"${council_harnesses}\""
 } > "$target/loop/loop.config.sh"
 
 # One-shot install-time substitution of the prompt templates' {{PLACEHOLDER}} tokens. These are
@@ -226,9 +235,9 @@ PY
 log "done. Next steps:"
 log "  1. Review $target/loop/loop.config.sh"
 if (( ${#missing_adapters[@]} > 0 )); then
-  log "  2. LOOP_KIT_HARNESSES includes ${missing_adapters[*]}, which has no adapter yet — run"
-  log "     'loop/new_harness.sh <name>' in the target repo for each and fill in the TODOs"
-  log "     before the loop can actually use it (see loop/harnesses/TEMPLATE.sh.example)."
+  log "  2. LOOP_KIT_HARNESSES/LOOP_KIT_COUNCIL_HARNESSES reference ${missing_adapters[*]}, which"
+  log "     has no adapter yet — run 'loop/new_harness.sh <name>' in the target repo for each and"
+  log "     fill in the TODOs before it can actually be used (see loop/harnesses/TEMPLATE.sh.example)."
 fi
 log "  3. Sharpen the adversarial red-team mandate in loop/review_prompt.tpl.md (search for the"
 log "     TODO comment) once you've seen a few real bugs slip through — that's where this kit's"

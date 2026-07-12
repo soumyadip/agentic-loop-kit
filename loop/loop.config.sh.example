@@ -80,3 +80,28 @@ LOOP_KIT_HARNESSES="codex claude cursor"
 
 # A custom harness (anything you scaffolded with loop/new_harness.sh) reads whatever
 # LOOP_KIT_<NAME>_* vars its own loop/harnesses/<name>.sh adapter defines — see that file.
+
+# --- council: who gets asked independent design/scope questions -----------------------------
+#
+# Space-separated *members*, same "harness" or "harness:model" syntax as LOOP_KIT_HARNESSES
+# above — see council.sh's own header comment. Unlike the maker/checker ring, council doesn't
+# need >=2 distinct members (there's no self-review adjacency concern for independent opinions
+# gathered in parallel with no cross-visibility), just diminishing value in asking the same
+# member twice. Each member's harness portion needs a loop/harnesses/<name>.sh adapter
+# implementing harness_council_run — codex, claude, cursor, and opencode all do out of the box.
+LOOP_KIT_COUNCIL_HARNESSES="codex opencode claude"
+
+# Shared across every council member's adapter (not per-harness — a council run is meant to
+# finish in one sitting, so there's no reason to tier this by CLI).
+# LOOP_KIT_COUNCIL_TIMEOUT="900"
+
+# Each adapter's council seat has its own model default, independent of that harness's
+# maker/checker models above — only applies to a *bare* member (no ':model' of its own).
+# LOOP_KIT_CODEX_COUNCIL_MODEL=""               # empty = let the codex CLI's own default decide
+# LOOP_KIT_CLAUDE_COUNCIL_MODEL="sonnet"
+# LOOP_KIT_CURSOR_COUNCIL_MODEL="grok-4.5-high" # falls back to LOOP_KIT_CURSOR_MODEL if unset
+# LOOP_KIT_OPENCODE_COUNCIL_MODEL="nvidia/z-ai/glm-5.2"
+
+# Skip specific members for a single run without editing this file (space-separated, matching
+# entries in LOOP_KIT_COUNCIL_HARNESSES exactly) — set as an env var when invoking council.sh,
+# not here, e.g.: COUNCIL_SKIP="opencode" loop/council.sh question.md

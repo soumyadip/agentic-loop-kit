@@ -1,5 +1,5 @@
 ---
-description: Get independent scope/spec opinions on a design or roadmap question from three separate LLMs (Codex, an opencode-hosted open model, and Claude), gathered in parallel, then synthesize them. User-invoked only — it takes several minutes and multiple model calls.
+description: Get independent scope/spec opinions on a design or roadmap question from several separate LLMs (default: Codex, an opencode-hosted open model, and Claude — configurable via LOOP_KIT_COUNCIL_HARNESSES), gathered in parallel, then synthesize them. User-invoked only — it takes several minutes and multiple model calls.
 argument-hint: [question or topic to scope]
 disable-model-invocation: true
 ---
@@ -30,15 +30,17 @@ what "good" looks like.
    times.
 
 2. Run `loop/council.sh <your-question-file.md>` via Bash with
-   `run_in_background: true` — it takes several minutes. Read
-   `loop/council.sh`'s own usage header for current env vars
-   (`COUNCIL_CODEX_MODEL`, `COUNCIL_OPENCODE_MODEL`, `COUNCIL_CLAUDE_MODEL`,
-   `COUNCIL_TIMEOUT`, `COUNCIL_SKIP_*`) if you need to tune it.
+   `run_in_background: true` — it takes several minutes. Who's asked is
+   `LOOP_KIT_COUNCIL_HARNESSES` in `loop.config.sh` (default `codex
+   opencode claude`); read `loop/council.sh`'s own usage header for the
+   current env vars (`COUNCIL_SKIP` to skip specific members for one run,
+   per-harness `LOOP_KIT_<NAME>_COUNCIL_MODEL`/`LOOP_KIT_COUNCIL_TIMEOUT`
+   in `loop.config.sh.example`) if you need to tune it.
 
-3. Once notified, read the three output files it reports and synthesize:
-   note where members converged unprompted (strongest signal), make an
-   explicit call wherever they split and say why, and present the
-   synthesis compactly before writing anything into the project's own
-   docs/specs. Only write those files if asked to, or after the user
-   confirms the synthesis — a council run that only informs the
-   conversation is a valid outcome on its own.
+3. Once notified, read the output files it reports (one per configured
+   member) and synthesize: note where members converged unprompted
+   (strongest signal), make an explicit call wherever they split and say
+   why, and present the synthesis compactly before writing anything into
+   the project's own docs/specs. Only write those files if asked to, or
+   after the user confirms the synthesis — a council run that only
+   informs the conversation is a valid outcome on its own.

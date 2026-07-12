@@ -12,6 +12,11 @@ CLAUDE_MAKER_EFFORT_GNARLY="${LOOP_KIT_CLAUDE_MAKER_EFFORT_GNARLY:-high}"
 
 CLAUDE_CHECKER_MODEL="${LOOP_KIT_CLAUDE_CHECKER_MODEL:-$CLAUDE_MAKER_MODEL_DEFAULT}"
 
+# Model claude-as-council-member uses, and how long council.sh waits for it.
+# LOOP_KIT_COUNCIL_TIMEOUT is shared across every council member's adapter.
+CLAUDE_COUNCIL_MODEL="${LOOP_KIT_CLAUDE_COUNCIL_MODEL:-sonnet}"
+CLAUDE_COUNCIL_TIMEOUT="${LOOP_KIT_COUNCIL_TIMEOUT:-900}"
+
 harness_maker_run() {
   local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5" model_override="${6:-}"
   local model effort="$CLAUDE_MAKER_EFFORT_DEFAULT"
@@ -42,4 +47,11 @@ harness_reviewer_run() {
 
 harness_reviewer_mode_note() {
   echo "You are running in \`plan\` permission mode: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
+}
+
+harness_council_run() {
+  local prompt_file="$1" output_file="$2" model_override="${3:-}"
+  local model="${model_override:-$CLAUDE_COUNCIL_MODEL}"
+  echo "  claude council ($model)" >&2
+  (cd "$ROOT" && timeout "$CLAUDE_COUNCIL_TIMEOUT" claude -p --model "$model" --permission-mode plan < "$prompt_file") > "$output_file" 2>&1
 }

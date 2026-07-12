@@ -19,6 +19,12 @@ is_builtin_harness() {
   return 1
 }
 
+# --harnesses entries can be a bare harness name ("cursor") or "harness:model" ("cursor:grok-
+# 4.5-high"), pinning a specific model — see run.sh's HARNESSES comment. These two helpers mirror
+# run.sh's member_harness/member_model exactly, so install.sh and run.sh agree on the syntax.
+member_harness() { echo "${1%%:*}"; }
+member_model() { [[ "$1" == *:* ]] && echo "${1#*:}" || echo ""; }
+
 usage() {
   cat <<EOF
 Usage: install.sh <target-repo-path> [options]
@@ -33,11 +39,15 @@ terminal, or fall back to the default shown when it isn't):
   --principles-doc PATH      working-principles doc the templates point at (default: AGENTS.md)
   --roadmap-doc PATH         milestone doc new_task.sh validates against; pass "" to disable
                               milestone validation entirely                (default: docs/roadmap.md)
-  --harnesses "a b c"        space-separated maker/checker rotation, order = review cycle,
-                              need >=2                              (default: $BUILTIN_HARNESSES)
-  --codex-model NAME         primary model for the codex harness, if selected  (default: gpt-5.6-terra)
-  --claude-model NAME        primary model for the claude harness, if selected (default: sonnet)
-  --cursor-model NAME        primary model for the cursor harness, if selected (default: grok-4.5-high)
+  --harnesses "a b:m c"      space-separated maker/checker rotation, order = review cycle, need
+                              >=2 entries (not necessarily >=2 distinct harnesses — an entry can
+                              be "harness:model" to pin one model on a multi-model harness like
+                              cursor or opencode, so e.g. "cursor:grok-4.5-high
+                              cursor:claude-4.5-sonnet" is a valid 2-entry rotation using only
+                              one CLI)                               (default: $BUILTIN_HARNESSES)
+  --codex-model NAME         default model for bare "codex" entries  (default: gpt-5.6-terra)
+  --claude-model NAME        default model for bare "claude" entries (default: sonnet)
+  --cursor-model NAME        default model for bare "cursor" entries (default: grok-4.5-high)
   --non-interactive          never prompt; use flags/defaults only
   --force                    overwrite an existing loop/loop.config.sh in the target
 EOF
@@ -93,13 +103,19 @@ if [[ "$non_interactive" != 1 && -t 0 ]]; then
   if [[ -n "$ans" ]]; then
     [[ "$ans" == "none" ]] && roadmap_doc="" || roadmap_doc="$ans"
   fi
-  read -rp "Harnesses for the maker/checker rotation (space-separated, order = review cycle, need >=2) [$harnesses]: " ans
+  read -rp "Harnesses/models for the maker/checker rotation (space-separated 'harness' or 'harness:model' entries, order = review cycle, need >=2) [$harnesses]: " ans
   harnesses="${ans:-$harnesses}"
+  # Only prompt once per bare (no ':model') harness name — an entry that already pins its own
+  # model doesn't need (or use) this project-wide default.
+  prompted=""
   for h in $harnesses; do
+    [[ "$h" == *:* ]] && continue
+    case " $prompted " in *" $h "*) continue ;; esac
+    prompted="$prompted $h"
     case "$h" in
-      codex)  read -rp "  Primary model for codex [$codex_model]: " ans; codex_model="${ans:-$codex_model}" ;;
-      claude) read -rp "  Primary model for claude [$claude_model]: " ans; claude_model="${ans:-$claude_model}" ;;
-      cursor) read -rp "  Primary model for cursor [$cursor_model]: " ans; cursor_model="${ans:-$cursor_model}" ;;
+      codex)  read -rp "  Default model for bare 'codex' entries [$codex_model]: " ans; codex_model="${ans:-$codex_model}" ;;
+      claude) read -rp "  Default model for bare 'claude' entries [$claude_model]: " ans; claude_model="${ans:-$claude_model}" ;;
+      cursor) read -rp "  Default model for bare 'cursor' entries [$cursor_model]: " ans; cursor_model="${ans:-$cursor_model}" ;;
       *) log "  '$h' has no built-in adapter — you'll need to run 'loop/new_harness.sh $h' in the target repo after install." ;;
     esac
   done
@@ -107,7 +123,16 @@ fi
 
 harness_count=0
 for h in $harnesses; do harness_count=$((harness_count+1)); done
-(( harness_count >= 2 )) || die "--harnesses needs at least 2 entries (got: '$harnesses') — a single harness can never review its own work"
+(( harness_count >= 2 )) || die "--harnesses needs at least 2 entries (got: '$harnesses') — a single entry can never review its own work. Use harness:model entries (e.g. 'cursor:grok-4.5-high cursor:claude-4.5-sonnet') if you only want one harness/CLI installed."
+
+# Reject exact-duplicate entries here too, same rule run.sh enforces at runtime — catch it at
+# install time instead of leaving a config that dies the first time loop/run.sh actually starts.
+harnesses_arr=($harnesses)
+for (( i = 0; i < ${#harnesses_arr[@]}; i++ )); do
+  for (( j = i + 1; j < ${#harnesses_arr[@]}; j++ )); do
+    [[ "${harnesses_arr[$i]}" == "${harnesses_arr[$j]}" ]] && die "--harnesses lists '${harnesses_arr[$i]}' twice — duplicate entries can't review each other. Pin a different model on one of them (harness:model) if you meant two distinct seats."
+  done
+done
 
 if [[ -f "$target/loop/loop.config.sh" && "$force" != 1 ]]; then
   die "$target/loop/loop.config.sh already exists — re-run with --force to overwrite it, or edit it by hand"
@@ -122,6 +147,7 @@ mkdir -p "$target/loop/queue/pending" "$target/loop/queue/in_progress" \
 
 cp "$KIT_ROOT"/loop/*.sh "$target/loop/"
 cp "$KIT_ROOT"/loop/*.tpl.md "$target/loop/"
+cp "$KIT_ROOT"/loop/review_mandate.partial.md "$target/loop/review_mandate.partial.md"
 cp "$KIT_ROOT"/loop/README.md "$target/loop/README.md"
 cp "$KIT_ROOT"/loop/loop.config.sh.example "$target/loop/loop.config.sh.example"
 cp "$KIT_ROOT"/loop/harnesses/*.sh "$target/loop/harnesses/" 2>/dev/null || true
@@ -130,11 +156,12 @@ cp "$KIT_ROOT"/skills/council/SKILL.md "$target/.claude/skills/council/SKILL.md"
 cp "$KIT_ROOT"/skills/new-task/SKILL.md "$target/.claude/skills/new-task/SKILL.md"
 chmod +x "$target"/loop/*.sh "$target"/loop/harnesses/*.sh
 
-# Warn (don't fail) about any selected harness that isn't built in and hasn't been scaffolded —
-# the install still completes, but that harness won't actually work until an adapter exists.
+# Warn (don't fail) about any selected member whose underlying harness isn't built in and hasn't
+# been scaffolded — the install still completes, but that member won't actually work until an
+# adapter exists.
 missing_adapters=()
 for h in $harnesses; do
-  [[ -f "$target/loop/harnesses/$h.sh" ]] || missing_adapters+=("$h")
+  [[ -f "$target/loop/harnesses/$(member_harness "$h").sh" ]] || missing_adapters+=("$h")
 done
 
 {
@@ -147,8 +174,16 @@ done
   echo "LOOP_KIT_PRINCIPLES_DOC=\"${principles_doc}\""
   echo "LOOP_KIT_ROADMAP_DOC=\"${roadmap_doc}\""
   echo "LOOP_KIT_HARNESSES=\"${harnesses}\""
+  # Only write a harness's project-wide default model config if some entry actually needs it
+  # (a bare entry with no ':model' of its own) — an all-pinned harness (every entry is
+  # "harness:model") doesn't read these vars at all.
+  written=""
   for h in $harnesses; do
-    case "$h" in
+    [[ "$h" == *:* ]] && continue
+    hn="$(member_harness "$h")"
+    case " $written " in *" $hn "*) continue ;; esac
+    written="$written $hn"
+    case "$hn" in
       codex)
         echo "LOOP_KIT_CODEX_MAKER_MODEL_DEFAULT=\"${codex_model}\""
         echo "LOOP_KIT_CODEX_CHECKER_MODEL=\"${codex_model}\""

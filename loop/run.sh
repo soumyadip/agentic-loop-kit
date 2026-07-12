@@ -11,6 +11,11 @@ die()  { echo "[loop] STOP: $*" >&2; exit 1; }
 # below via ${VAR:-default}.
 [[ -f "$ROOT/loop/loop.config.sh" ]] && source "$ROOT/loop/loop.config.sh"
 
+# Unlike loop.config.sh above, this one is not optional: render() silently inserts empty string
+# for a missing {{RED_TEAM_MANDATE}} source, and a reviewer prompt that quietly loses its entire
+# adversarial mandate is a much worse failure than a script that refuses to start.
+[[ -f "$ROOT/loop/review_mandate.partial.md" ]] || die "missing loop/review_mandate.partial.md — required by review_prompt.tpl.md/pr_review_prompt.tpl.md via render()'s {{RED_TEAM_MANDATE}} token"
+
 PENDING="$ROOT/loop/queue/pending"
 IN_PROGRESS="$ROOT/loop/queue/in_progress"
 BLOCKED="$ROOT/loop/queue/blocked"
@@ -24,32 +29,51 @@ MAX_ITERATIONS="${LOOP_MAX_ITERATIONS:-5}"
 MAX_RETRIES="${LOOP_MAX_RETRIES:-2}"
 BASE_BRANCH="${LOOP_BASE_BRANCH:-main}"
 
-# --- harnesses: which CLIs are in the maker/checker rotation, and in what order ----------------
+# --- harnesses: which maker/checker "seats" are in the rotation, and in what order -------------
 #
-# Every harness in this list is used as both a maker (for tasks whose `maker:` frontmatter names
-# it) and a reviewer — the review cycle is a ring over this exact list (see reviewer_for() below):
-# each harness is reviewed by the next one in order, wrapping around, so no model ever grades its
-# own homework and no single vendor is a hard dependency for the whole loop to keep moving. This
-# generalizes what used to be a fixed codex->claude->cursor->codex cycle to any ordered list of
-# >=2 harnesses. Configurable via LOOP_KIT_HARNESSES in loop.config.sh (space-separated names);
-# each name must have a matching loop/harnesses/<name>.sh adapter — see
-# loop/harnesses/TEMPLATE.sh.example (or `loop/new_harness.sh <name>`) to add one that isn't
-# built in. Every adapter owns its own model/effort selection (reading its own LOOP_KIT_* vars);
-# run.sh itself has no per-harness special-casing left.
+# Each entry in this list is a *member*: either a bare harness name (`cursor`, using that
+# harness's own configured default model) or `harness:model` (e.g. `cursor:grok-4.5-high`,
+# pinning a specific model). This lets one multi-model-capable harness like `cursor` or
+# `opencode` fill several seats in the rotation by itself — `cursor:grok-4.5-high` and
+# `cursor:claude-4.5-sonnet` are two independent members even though they share one adapter and
+# one underlying CLI/account, because a diff made under one model family is still meaningfully
+# checked by a different one. Every member is used as both a maker (for tasks whose `maker:`
+# frontmatter names it) and a reviewer — the review cycle is a ring over this exact list (see
+# reviewer_for() below): each member is reviewed by the next one in order, wrapping around, so no
+# model ever grades its own homework. Needs >=2 *members* — not necessarily 2 distinct harnesses,
+# since two members of the same harness with different models are still independent seats — and
+# no two members may be byte-identical (that would be genuine self-review).
 #
-# opencode is deliberately not a built-in harness here — it's reserved for loop/council.sh's
-# independent third-opinion role (see council.sh's own COUNCIL_OPENCODE_MODEL). Mixing it into
-# the maker/checker rotation would blur that separation: council.sh's value is asking several
-# models the same question with no visibility into each other's answers, a different job from a
-# pipeline where each step *should* see the prior step's work. Nothing stops you from adding an
-# opencode adapter to the rotation too, if you want that instead.
+# Configurable via LOOP_KIT_HARNESSES in loop.config.sh (space-separated member specs); each
+# member's harness portion (before any `:model`) must have a matching loop/harnesses/<name>.sh
+# adapter — see loop/harnesses/TEMPLATE.sh.example (or `loop/new_harness.sh <name>`) to add one
+# that isn't built in. Every adapter owns its own model/effort selection when no model is pinned
+# (reading its own LOOP_KIT_* vars); run.sh itself has no per-harness special-casing left.
+#
+# opencode is deliberately not a *built-in* harness here — it's reserved for loop/council.sh's
+# independent third-opinion role (see council.sh's own COUNCIL_OPENCODE_MODEL) by default.
+# Nothing stops you from writing an opencode adapter and adding members for it to this rotation
+# too (it's exactly the kind of multi-model-family harness this member-spec syntax is for).
 read -ra HARNESSES <<< "${LOOP_KIT_HARNESSES:-codex claude cursor}"
-(( ${#HARNESSES[@]} >= 2 )) || die "LOOP_KIT_HARNESSES must list at least 2 harnesses (got: ${HARNESSES[*]:-none}) — a single harness can never review its own work"
+(( ${#HARNESSES[@]} >= 2 )) || die "LOOP_KIT_HARNESSES must list at least 2 members (got: ${HARNESSES[*]:-none}) — a single member can never review its own work. Use harness:model entries (e.g. 'cursor:grok-4.5-high cursor:claude-4.5-sonnet') if you only want one harness/CLI."
+
+# Splits a member spec into its harness portion (before ':') — "cursor:grok-4.5-high" -> "cursor",
+# "codex" -> "codex".
+member_harness() { echo "${1%%:*}"; }
+# Splits a member spec into its pinned model, if any — "cursor:grok-4.5-high" -> "grok-4.5-high",
+# "codex" -> "" (meaning: let that harness's adapter pick its own default/tiered model).
+member_model() { [[ "$1" == *:* ]] && echo "${1#*:}" || echo ""; }
+
 for h in "${HARNESSES[@]}"; do
-  [[ -f "$ROOT/loop/harnesses/$h.sh" ]] || die "no adapter at loop/harnesses/$h.sh for harness '$h' listed in LOOP_KIT_HARNESSES — see loop/harnesses/TEMPLATE.sh.example"
+  [[ -f "$ROOT/loop/harnesses/$(member_harness "$h").sh" ]] || die "no adapter at loop/harnesses/$(member_harness "$h").sh for member '$h' listed in LOOP_KIT_HARNESSES — see loop/harnesses/TEMPLATE.sh.example"
+done
+for (( i = 0; i < ${#HARNESSES[@]}; i++ )); do
+  for (( j = i + 1; j < ${#HARNESSES[@]}; j++ )); do
+    [[ "${HARNESSES[$i]}" == "${HARNESSES[$j]}" ]] && die "LOOP_KIT_HARNESSES lists '${HARNESSES[$i]}' twice — duplicate members can't review each other. Pin a different model on one of them (harness:model) if you meant two distinct seats."
+  done
 done
 
-# Prints the reviewer for maker $1: the next harness after it in the HARNESSES ring, wrapping
+# Prints the reviewer for maker $1: the next member after it in the HARNESSES ring, wrapping
 # around.
 reviewer_for() {
   local maker="$1" i n
@@ -166,39 +190,9 @@ is_backed_off() {
   [[ -n "$until_epoch" ]] && (( until_epoch > now ))
 }
 
-render() { # render TEMPLATE TASK_ID TASK_BODY_FILE BRANCH [FAILURE_FILE] [MAKER] [BREAK_ATTEMPTS] [REVIEWER_MODE_NOTE]
-  local tpl="$1" task_id="$2" body_file="$3" branch="$4" failure_file="${5:-}" maker_name="${6:-codex}" break_attempts="${7:-1}" reviewer_mode_note="${8:-}"
-  local out body failure_block="" failure_content
-  body=$(cat "$body_file")
-  if [[ -n "$failure_file" && -s "$failure_file" ]]; then
-    # Cap how much of a failed attempt's raw output gets replayed into the retry prompt. A stuck
-    # maker (e.g. cursor's stream-json transcript) can produce multi-MB output; feeding all of it
-    # back both buries the actual error under noise and risks the argv-size failure this comment
-    # used to warn about only for TASK_BODY. Keep the tail, since that's where the error lives.
-    failure_content=$(tail -c 8000 "$failure_file")
-    failure_block=$'\n## Previous attempt failed\n\n```\n'"$failure_content"$'\n```\n'
-  fi
-  out=$(cat "$tpl")
-  out="${out//\{\{TASK_ID\}\}/$task_id}"
-  out="${out//\{\{BRANCH\}\}/$branch}"
-  out="${out//\{\{MAKER\}\}/$maker_name}"
-  out="${out//\{\{BREAK_ATTEMPTS\}\}/$break_attempts}"
-  out="${out//\{\{PREVIOUS_FAILURE_BLOCK\}\}/$failure_block}"
-  out="${out//\{\{REVIEWER_MODE_NOTE\}\}/$reviewer_mode_note}"
-  # TASK_BODY can contain & and other sed-hostile chars; do it last with a literal-safe approach.
-  # $out goes over stdin rather than argv: even with the cap above, a single shell argument has a
-  # much lower effective limit than ARG_MAX suggests, and the previous argv-based version failed
-  # silently on a large $out (python errored, and the bash fallback assigned but never printed —
-  # producing an empty rendered prompt instead of a visible error).
-  if ! python3 -c '
-import sys
-out = sys.stdin.read()
-body = open(sys.argv[1]).read()
-sys.stdout.write(out.replace("{{TASK_BODY}}", body))
-' "$body_file" <<<"$out" 2>/dev/null; then
-    printf '%s' "${out/\{\{TASK_BODY\}\}/$body}"
-  fi
-}
+# render() (used for every template in this kit) lives in loop/render.sh, sourced by both this
+# script and review_pr.sh so rendering logic can't drift between the two call sites.
+source "$ROOT/loop/render.sh"
 
 # --- dependency-aware, per-maker task picking -------------------------------------------------
 #
@@ -340,11 +334,16 @@ run_task_pipeline() {
     # TEMPLATE.sh.example) — every adapter defines the same function names, so whichever was
     # sourced most recently is the one that runs. Deliberately re-sourced every attempt rather
     # than once outside the loop: keeps this correct even though the same task_pipeline process
-    # will later source a *different* adapter for the reviewer step below.
-    source "$ROOT/loop/harnesses/$maker.sh"
-    local maker_final="$task_log/attempt-$attempt-maker-$maker.log"
+    # will later source a *different* adapter for the reviewer step below. $maker here is a full
+    # member spec (harness or harness:model, see the HARNESSES comment near the top of this
+    # file); member_harness/member_model split it into the adapter to load and the model, if
+    # any, to pin.
+    local maker_harness; maker_harness=$(member_harness "$maker")
+    local maker_model; maker_model=$(member_model "$maker")
+    source "$ROOT/loop/harnesses/$maker_harness.sh"
+    local maker_final="$task_log/attempt-$attempt-maker-${maker//:/-}.log"
     log "  $task_id attempt $attempt: $maker maker"
-    harness_maker_run "$worktree" "$prompt_file" "$maker_final" "$complexity" "$network_access"
+    harness_maker_run "$worktree" "$prompt_file" "$maker_final" "$complexity" "$network_access" "$maker_model"
     local maker_status=$?
 
     # The maker was told to write this relative to its own cwd, i.e. inside the worktree, not $ROOT.
@@ -355,7 +354,10 @@ run_task_pipeline() {
     fi
 
     if (( maker_status != 0 )); then
-      record_backoff "$maker" "$maker_final"
+      # Backoff is keyed by the underlying harness/CLI, not the full member spec: a usage-limit
+      # hit on the cursor-agent account blocks every model routed through it, not just the one
+      # this attempt happened to pin.
+      record_backoff "$maker_harness" "$maker_final"
       failure_file="$maker_final"
       log "  $task_id: $maker exited $maker_status, will retry if budget remains"
       continue
@@ -387,24 +389,28 @@ run_task_pipeline() {
       break
     fi
 
-    # Reviewer is the next harness after $maker in the HARNESSES ring (see reviewer_for() near
+    # Reviewer is the next member after $maker in the HARNESSES ring (see reviewer_for() near
     # the top of this file) — generalizes what used to be a fixed codex->claude->cursor->codex
-    # cycle to any ordered list of >=2 configured harnesses.
+    # cycle to any ordered list of >=2 configured members, including several members that share
+    # one multi-model harness.
     local reviewer; reviewer=$(reviewer_for "$maker")
+    local reviewer_harness; reviewer_harness=$(member_harness "$reviewer")
+    local reviewer_model; reviewer_model=$(member_model "$reviewer")
 
     # Source the reviewer's adapter and render the one shared review_prompt.tpl.md — the only
     # thing that differs between reviewers is the {{REVIEWER_MODE_NOTE}} line describing that
     # CLI's own read-only mode, which the adapter itself supplies.
-    source "$ROOT/loop/harnesses/$reviewer.sh"
+    source "$ROOT/loop/harnesses/$reviewer_harness.sh"
     local review_prompt="$task_log/attempt-$attempt-review-prompt.md"
-    local review_out="$task_log/attempt-$attempt-review-$reviewer.log"
+    local review_out="$task_log/attempt-$attempt-review-${reviewer//:/-}.log"
     local reviewer_mode_note; reviewer_mode_note=$(harness_reviewer_mode_note)
     render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$reviewer_mode_note" > "$review_prompt"
     log "  $task_id attempt $attempt: $reviewer review ($maker was the maker)"
-    harness_reviewer_run "$worktree" "$review_prompt" "$review_out" "$BASE_BRANCH"
+    harness_reviewer_run "$worktree" "$review_prompt" "$review_out" "$BASE_BRANCH" "$reviewer_model"
 
     if grep -qiE 'usage limit|rate.?limit|quota exceeded|resource.?exhausted|429 ' "$review_out" 2>/dev/null; then
-      record_backoff "$reviewer" "$review_out"
+      # Keyed by underlying harness, same reasoning as the maker's record_backoff call above.
+      record_backoff "$reviewer_harness" "$review_out"
       log "  $task_id: $reviewer review hit a usage/rate limit — blocking for human rather than misreading this as no verdict"
       outcome="blocked: $reviewer review hit a usage/rate limit"
       break
@@ -439,12 +445,15 @@ run_task_pipeline() {
 #
 # Previously this processed exactly one task start-to-finish (claim -> worktree -> attempts ->
 # verify -> review -> merge) before even looking at the next. Since each task already has a fixed
-# maker and each configured harness is an independent account/tool, there's no reason every
-# harness in HARNESSES can't be working on a different ready task at the same time instead of
-# the rest sitting idle while one runs. Claiming (moving pending -> in_progress) stays synchronous
-# in the controller, one maker lane at a time, before anything is backgrounded — that's what keeps
-# this safe; only the maker/verify/review work itself (run_task_pipeline) runs concurrently, and
-# merging into $BASE_BRANCH stays serialized in the controller after `wait`.
+# maker, there's no reason every member in HARNESSES can't be working on a different ready task
+# at the same time instead of the rest sitting idle while one runs — even two members that share
+# one underlying harness/account (see the HARNESSES comment near the top of this file) run their
+# own maker/verify/review pipeline concurrently; only actual CLI calls funneled through the same
+# account serialize naturally at the OS/network level, not anything this script does. Claiming
+# (moving pending -> in_progress) stays synchronous in the controller, one maker lane at a time,
+# before anything is backgrounded — that's what keeps this safe; only the maker/verify/review
+# work itself (run_task_pipeline) runs concurrently, and merging into $BASE_BRANCH stays
+# serialized in the controller after `wait`.
 
 consecutive_blocked=0
 iteration=0
@@ -456,8 +465,11 @@ while (( iteration < MAX_ITERATIONS )); do
   for maker in "${HARNESSES[@]}"; do
     (( iteration + batch_size >= MAX_ITERATIONS )) && break
 
-    if is_backed_off "$maker"; then
-      until_epoch=$(awk -v m="$maker" '$1==m {print $2}' "$BACKOFF_FILE" | tail -1)
+    # Backoff is keyed by underlying harness (see record_backoff calls in run_task_pipeline), so
+    # a cooldown on one member of a multi-model harness correctly sits out every member sharing
+    # that harness/account, not just the one that happened to trip it.
+    if is_backed_off "$(member_harness "$maker")"; then
+      until_epoch=$(awk -v m="$(member_harness "$maker")" '$1==m {print $2}' "$BACKOFF_FILE" | tail -1)
       log "  $maker is in cooldown until $(date -r "$until_epoch" 2>/dev/null || date -d "@$until_epoch" 2>/dev/null || echo "epoch $until_epoch") — sitting this turn out"
       continue
     fi

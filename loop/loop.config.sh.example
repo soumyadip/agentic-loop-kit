@@ -27,23 +27,33 @@ LOOP_KIT_PRINCIPLES_DOC="AGENTS.md"
 # don't track milestones as a doc).
 LOOP_KIT_ROADMAP_DOC="docs/roadmap.md"
 
-# --- harnesses: which CLIs are in the maker/checker rotation --------------------------------
+# --- harnesses: which maker/checker "seats" are in the rotation -----------------------------
 #
-# Space-separated, order matters: each harness is reviewed by the next one in this list,
-# wrapping around (a ring) — see run.sh's reviewer_for(). Needs at least 2; a single harness
-# can never review its own work. Every name here must have a matching
-# loop/harnesses/<name>.sh adapter (loop/harnesses/TEMPLATE.sh.example documents the
-# interface; `loop/new_harness.sh <name>` scaffolds a new one). This kit ships built-in
-# adapters for codex, claude, and cursor — drop any subset of the three (still need >=2), or
-# add your own (aider, gemini-cli, ...) alongside them.
+# Space-separated *members*, order matters: each member is reviewed by the next one in this
+# list, wrapping around (a ring) — see run.sh's reviewer_for(). Needs at least 2 members; a
+# single member can never review its own work. A member is either a bare harness name
+# ("cursor", using that harness's own configured default model below) or "harness:model"
+# ("cursor:grok-4.5-high"), pinning a specific model — which lets one multi-model-capable
+# harness like cursor or opencode fill more than one seat by itself, e.g.:
+#   LOOP_KIT_HARNESSES="cursor:grok-4.5-high cursor:claude-4.5-sonnet"
+# is a valid 2-member rotation using only the cursor-agent CLI — a diff made under one model
+# family is still meaningfully checked by a different one, even sharing one adapter/account.
+# Every member's harness portion must have a matching loop/harnesses/<name>.sh adapter
+# (loop/harnesses/TEMPLATE.sh.example documents the interface; `loop/new_harness.sh <name>`
+# scaffolds a new one). This kit ships built-in adapters for codex, claude, and cursor — drop
+# any subset (still need >=2 members total), reorder them, repeat one with different pinned
+# models, or add your own (aider, gemini-cli, opencode, ...) alongside them.
 LOOP_KIT_HARNESSES="codex claude cursor"
 
 # Each built-in adapter reads its own model config below; unset ones fall back to the
-# adapter's own defaults (see loop/harnesses/<name>.sh). MAKER_MODEL_DEFAULT/EFFORT_DEFAULT
+# adapter's own defaults (see loop/harnesses/<name>.sh). These only apply to *bare* members
+# (no ':model' of their own) — a pinned member like "cursor:grok-4.5-high" always uses exactly
+# that model and ignores LOOP_KIT_CURSOR_MODEL entirely. MAKER_MODEL_DEFAULT/EFFORT_DEFAULT
 # apply to a task with no `complexity:` frontmatter; _QUICK/_GNARLY are the cheaper/stronger
-# tiers a task opts into with `complexity: quick`/`complexity: gnarly`. CHECKER_MODEL is used
-# when this harness is reviewing someone else's diff (not tiered by complexity — review
-# strength doesn't scale with a task's declared complexity).
+# tiers a task opts into with `complexity: quick`/`complexity: gnarly` (also skipped for a
+# pinned member — an explicit model choice isn't re-tiered). CHECKER_MODEL is used when this
+# harness is reviewing someone else's diff (not tiered by complexity — review strength doesn't
+# scale with a task's declared complexity).
 
 # codex — reasoning effort is a separate config override, not baked into the model slug.
 # LOOP_KIT_CODEX_MAKER_MODEL_DEFAULT="gpt-5.6-terra"

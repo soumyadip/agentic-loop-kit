@@ -18,12 +18,19 @@ CODEX_MAKER_EFFORT_GNARLY="${LOOP_KIT_CODEX_MAKER_EFFORT_GNARLY:-high}"
 CODEX_CHECKER_MODEL="${LOOP_KIT_CODEX_CHECKER_MODEL:-$CODEX_MAKER_MODEL_DEFAULT}"
 
 harness_maker_run() {
-  local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5"
-  local model="$CODEX_MAKER_MODEL_DEFAULT" effort="$CODEX_MAKER_EFFORT_DEFAULT"
-  case "$complexity" in
-    quick)  model="$CODEX_MAKER_MODEL_QUICK";  effort="$CODEX_MAKER_EFFORT_QUICK" ;;
-    gnarly) model="$CODEX_MAKER_MODEL_GNARLY"; effort="$CODEX_MAKER_EFFORT_GNARLY" ;;
-  esac
+  local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5" model_override="${6:-}"
+  local model effort="$CODEX_MAKER_EFFORT_DEFAULT"
+  if [[ -n "$model_override" ]]; then
+    # A pinned model (harness:model member spec) overrides complexity tiering entirely — the
+    # member spec is an explicit choice, not something a task's complexity should second-guess.
+    model="$model_override"
+  else
+    model="$CODEX_MAKER_MODEL_DEFAULT"
+    case "$complexity" in
+      quick)  model="$CODEX_MAKER_MODEL_QUICK";  effort="$CODEX_MAKER_EFFORT_QUICK" ;;
+      gnarly) model="$CODEX_MAKER_MODEL_GNARLY"; effort="$CODEX_MAKER_EFFORT_GNARLY" ;;
+    esac
+  fi
   echo "  codex exec maker ($model, effort=$effort, complexity=$complexity)" >&2
   # --add-dir for $ROOT/.git: see this file's header comment on why a worktree needs it.
   local events_file="${output_file}.events.jsonl"
@@ -40,11 +47,12 @@ harness_maker_run() {
 }
 
 harness_reviewer_run() {
-  local worktree="$1" prompt_file="$2" output_file="$3" base_branch="$4"
-  echo "  codex exec review" >&2
+  local worktree="$1" prompt_file="$2" output_file="$3" base_branch="$4" model_override="${5:-}"
+  local model="${model_override:-$CODEX_CHECKER_MODEL}"
+  echo "  codex exec review${model:+ ($model)}" >&2
   local events_file="${output_file}.events.jsonl"
   local args=(exec review --base "$base_branch" --json -o "$output_file")
-  [[ -n "$CODEX_CHECKER_MODEL" ]] && args+=(-m "$CODEX_CHECKER_MODEL")
+  [[ -n "$model" ]] && args+=(-m "$model")
   (cd "$worktree" && codex "${args[@]}" - < "$prompt_file") > "$events_file" 2>&1
   local status=$?
   [[ -s "$output_file" ]] || cp "$events_file" "$output_file" 2>/dev/null

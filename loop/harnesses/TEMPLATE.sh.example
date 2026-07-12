@@ -9,7 +9,7 @@
 # these same names; whichever was sourced most recently wins, and run.sh always re-sources right
 # before calling.
 #
-#   harness_maker_run WORKTREE PROMPT_FILE OUTPUT_FILE COMPLEXITY NETWORK_ACCESS
+#   harness_maker_run WORKTREE PROMPT_FILE OUTPUT_FILE COMPLEXITY NETWORK_ACCESS MODEL_OVERRIDE
 #     Run this harness's CLI as a maker: read the rendered task prompt from PROMPT_FILE (usually
 #     piped to the CLI's stdin), execute with $WORKTREE as the working directory/workspace, and
 #     write everything useful for (a) a human reading a retry prompt and (b) usage-limit/backoff
@@ -18,13 +18,17 @@
 #     `complexity:` frontmatter) — map it to whichever model/effort this harness supports, or
 #     ignore it if this harness has nothing to tier. NETWORK_ACCESS is "true" or empty, from a
 #     task's `network_access:` frontmatter — honor it if this harness has a sandbox network
-#     toggle, no-op otherwise.
+#     toggle, no-op otherwise. MODEL_OVERRIDE is set when this call is for a `harness:model`
+#     member (see run.sh's HARNESSES comment) — if non-empty, use exactly that model and skip any
+#     complexity-tiering logic entirely (the member spec is an explicit choice); if empty, fall
+#     back to this harness's own configured default/tiered model.
 #
-#   harness_reviewer_run WORKTREE PROMPT_FILE OUTPUT_FILE BASE_BRANCH
+#   harness_reviewer_run WORKTREE PROMPT_FILE OUTPUT_FILE BASE_BRANCH MODEL_OVERRIDE
 #     Same shape, but run this harness's CLI in a read-only/plan review mode against the diff in
-#     $WORKTREE relative to $BASE_BRANCH. The rendered review prompt (from review_prompt.tpl.md)
-#     already tells the model what to check and to end with a `VERDICT: ...` line — run.sh parses
-#     that line out of OUTPUT_FILE afterward, so nothing else needs to structure the output.
+#     $WORKTREE relative to $BASE_BRANCH. MODEL_OVERRIDE behaves the same as above. The rendered
+#     review prompt (from review_prompt.tpl.md) already tells the model what to check and to end
+#     with a `VERDICT: ...` line — run.sh parses that line out of OUTPUT_FILE afterward, so
+#     nothing else needs to structure the output.
 #
 #   harness_reviewer_mode_note
 #     Echo one plain-text sentence describing how this harness's read-only/plan mode actually
@@ -40,23 +44,29 @@
 # Every harness listed in LOOP_KIT_HARNESSES is used as both a maker (for tasks whose `maker:`
 # names it) and a reviewer (the rotation is a ring over the whole list — see reviewer_for() in
 # run.sh), so it needs all three functions below, not just the one matching how you plan to use
-# it first.
+# it first. If this harness fronts multiple model families (like cursor-agent or opencode), you
+# don't need multiple adapter files for that — list it more than once in LOOP_KIT_HARNESSES with
+# different `harness:model` specs (e.g. `example:model-a example:model-b`) and MODEL_OVERRIDE
+# carries the rest.
 
 HARNESS_NAME="TODO"  # must match this file's name (without .sh)
 
-# TODO: model/effort config this harness reads from loop.config.sh, e.g.:
+# TODO: model/effort config this harness reads from loop.config.sh, used only when a member spec
+# doesn't pin its own model (MODEL_OVERRIDE empty below), e.g.:
 # EXAMPLE_MODEL="${LOOP_KIT_EXAMPLE_MODEL:-some-default}"
 
 harness_maker_run() {
-  local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5"
+  local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5" model_override="${6:-}"
+  local model="${model_override:-$EXAMPLE_MODEL}"
   # TODO: invoke your CLI here, e.g.:
-  # (cd "$worktree" && your-cli --some-flag < "$prompt_file") > "$output_file" 2>&1
+  # (cd "$worktree" && your-cli --model "$model" --some-flag < "$prompt_file") > "$output_file" 2>&1
   echo "TODO: harness_maker_run not implemented for $HARNESS_NAME" > "$output_file"
   return 1
 }
 
 harness_reviewer_run() {
-  local worktree="$1" prompt_file="$2" output_file="$3" base_branch="$4"
+  local worktree="$1" prompt_file="$2" output_file="$3" base_branch="$4" model_override="${5:-}"
+  local model="${model_override:-$EXAMPLE_MODEL}"
   # TODO: invoke your CLI in read-only/plan mode here.
   echo "TODO: harness_reviewer_run not implemented for $HARNESS_NAME" > "$output_file"
   return 1

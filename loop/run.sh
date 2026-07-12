@@ -3,6 +3,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+log()  { echo "[loop] $*"; }
+die()  { echo "[loop] STOP: $*" >&2; exit 1; }
+
 # Per-repo settings written by install.sh (build/test commands, sensitive-path pattern, etc.) —
 # see loop.config.sh.example. Safe to be absent: every var it might set has a generic fallback
 # below via ${VAR:-default}.
@@ -21,56 +24,44 @@ MAX_ITERATIONS="${LOOP_MAX_ITERATIONS:-5}"
 MAX_RETRIES="${LOOP_MAX_RETRIES:-2}"
 BASE_BRANCH="${LOOP_BASE_BRANCH:-main}"
 
-# Reviewer-step models (the fixed cycle below: codex's work is checked by claude, claude's by
-# cursor, cursor's by codex). Maker-step model selection is separate and complexity-tiered — see
-# below — since scaling review strength with the task's declared complexity wasn't asked for and
-# keeps review predictable.
-CODEX_MODEL="${LOOP_CODEX_MODEL:-}"
-CLAUDE_MODEL="${LOOP_CLAUDE_MODEL:-sonnet}"
-
-# opencode is deliberately not a maker or reviewer option in this loop — it's reserved for
-# loop/council.sh's independent third-opinion role (see council.sh's own COUNCIL_OPENCODE_MODEL).
-# Mixing it into the maker/checker rotation here would blur that separation: council.sh's value
-# is asking three models the same question with no visibility into each other's answers, which
-# is a different job from a maker/checker pipeline where each step *should* see the prior step's
-# work.
+# --- harnesses: which CLIs are in the maker/checker rotation, and in what order ----------------
 #
-# The three makers below (codex, claude, cursor) review each other in a fixed cycle — codex's
-# work is checked by claude, claude's by cursor, cursor's by codex — so no model ever grades its
-# own homework and no single vendor is a hard dependency for the whole loop to keep moving.
-MAKERS=(codex claude cursor)
-
-# --- maker-step model selection, by complexity tier -------------------------------------------
+# Every harness in this list is used as both a maker (for tasks whose `maker:` frontmatter names
+# it) and a reviewer — the review cycle is a ring over this exact list (see reviewer_for() below):
+# each harness is reviewed by the next one in order, wrapping around, so no model ever grades its
+# own homework and no single vendor is a hard dependency for the whole loop to keep moving. This
+# generalizes what used to be a fixed codex->claude->cursor->codex cycle to any ordered list of
+# >=2 harnesses. Configurable via LOOP_KIT_HARNESSES in loop.config.sh (space-separated names);
+# each name must have a matching loop/harnesses/<name>.sh adapter — see
+# loop/harnesses/TEMPLATE.sh.example (or `loop/new_harness.sh <name>`) to add one that isn't
+# built in. Every adapter owns its own model/effort selection (reading its own LOOP_KIT_* vars);
+# run.sh itself has no per-harness special-casing left.
 #
-# A task's frontmatter can set `complexity: quick` or `complexity: gnarly` to route its maker step
-# to a cheaper/faster or a stronger model+effort than the default; omitting the field (the common
-# case, see task_complexity() below) uses the default tier.
+# opencode is deliberately not a built-in harness here — it's reserved for loop/council.sh's
+# independent third-opinion role (see council.sh's own COUNCIL_OPENCODE_MODEL). Mixing it into
+# the maker/checker rotation would blur that separation: council.sh's value is asking several
+# models the same question with no visibility into each other's answers, a different job from a
+# pipeline where each step *should* see the prior step's work. Nothing stops you from adding an
+# opencode adapter to the rotation too, if you want that instead.
+read -ra HARNESSES <<< "${LOOP_KIT_HARNESSES:-codex claude cursor}"
+(( ${#HARNESSES[@]} >= 2 )) || die "LOOP_KIT_HARNESSES must list at least 2 harnesses (got: ${HARNESSES[*]:-none}) — a single harness can never review its own work"
+for h in "${HARNESSES[@]}"; do
+  [[ -f "$ROOT/loop/harnesses/$h.sh" ]] || die "no adapter at loop/harnesses/$h.sh for harness '$h' listed in LOOP_KIT_HARNESSES — see loop/harnesses/TEMPLATE.sh.example"
+done
 
-# codex: reasoning effort is a separate `-c model_reasoning_effort=` config override, not baked
-# into the model slug the way cursor's is (see CURSOR_MODEL below).
-CODEX_MAKER_MODEL_DEFAULT="${LOOP_CODEX_MAKER_MODEL_DEFAULT:-gpt-5.6-terra}"
-CODEX_MAKER_EFFORT_DEFAULT="${LOOP_CODEX_MAKER_EFFORT_DEFAULT:-high}"
-CODEX_MAKER_MODEL_QUICK="${LOOP_CODEX_MAKER_MODEL_QUICK:-gpt-5.6-luna}"
-CODEX_MAKER_EFFORT_QUICK="${LOOP_CODEX_MAKER_EFFORT_QUICK:-high}"
-CODEX_MAKER_MODEL_GNARLY="${LOOP_CODEX_MAKER_MODEL_GNARLY:-gpt-5.6-sol}"
-CODEX_MAKER_EFFORT_GNARLY="${LOOP_CODEX_MAKER_EFFORT_GNARLY:-high}"
-
-# `maker: claude` routes a task's implementation step to `claude -p --dangerously-skip-permissions`
-# instead of Codex, and its review (see the reviewer cycle above) to `cursor-agent`. `--effort` is
-# a separate CLI flag from `--model`, same shape as codex's config override above.
-CLAUDE_MAKER_MODEL_DEFAULT="${LOOP_CLAUDE_MAKER_MODEL_DEFAULT:-sonnet}"
-CLAUDE_MAKER_EFFORT_DEFAULT="${LOOP_CLAUDE_MAKER_EFFORT_DEFAULT:-high}"
-CLAUDE_MAKER_MODEL_QUICK="${LOOP_CLAUDE_MAKER_MODEL_QUICK:-sonnet}"
-CLAUDE_MAKER_EFFORT_QUICK="${LOOP_CLAUDE_MAKER_EFFORT_QUICK:-medium}"
-CLAUDE_MAKER_MODEL_GNARLY="${LOOP_CLAUDE_MAKER_MODEL_GNARLY:-opus}"
-CLAUDE_MAKER_EFFORT_GNARLY="${LOOP_CLAUDE_MAKER_EFFORT_GNARLY:-high}"
-
-# `maker: cursor` routes a task's implementation step to `cursor-agent -p --force`, and its
-# review (see the reviewer cycle above) to `codex exec review`. No complexity tiering here —
-# cursor's model slug already bakes reasoning effort in (e.g. `grok-4.5-high`), so one flat
-# default covers every complexity tier.
-CURSOR_MODEL="${LOOP_CURSOR_MODEL:-grok-4.5-high}"
-CURSOR_MAKER_TIMEOUT="${LOOP_CURSOR_MAKER_TIMEOUT:-900}"
+# Prints the reviewer for maker $1: the next harness after it in the HARNESSES ring, wrapping
+# around.
+reviewer_for() {
+  local maker="$1" i n
+  n=${#HARNESSES[@]}
+  for (( i = 0; i < n; i++ )); do
+    if [[ "${HARNESSES[$i]}" == "$maker" ]]; then
+      echo "${HARNESSES[$(( (i + 1) % n ))]}"
+      return 0
+    fi
+  done
+  echo "${HARNESSES[0]}"  # maker not in HARNESSES — shouldn't happen, task_maker validates against it
+}
 
 # How many distinct attempts a reviewer makes to actively break the maker's diff during its
 # red-team pass (see the review prompt templates), not how many times the review itself is
@@ -89,9 +80,6 @@ SENSITIVE_PATTERN="${LOOP_KIT_SENSITIVE_PATTERN:-^(deploy/|secrets|\.github/work
 
 mkdir -p "$PENDING" "$IN_PROGRESS" "$BLOCKED" "$DONE" "$LOG" "$WORKTREES" "$STATE_DIR"
 touch "$BACKOFF_FILE"
-
-log()  { echo "[loop] $*"; }
-die()  { echo "[loop] STOP: $*" >&2; exit 1; }
 
 # Single-instance guard. Two `run.sh` processes running at once have no way to coordinate which
 # pending task each has claimed — `mv "$task_file" "$IN_PROGRESS/..."` isn't checked for success,
@@ -220,12 +208,23 @@ sys.stdout.write(out.replace("{{TASK_BODY}}", body))
 # actually ran and self-reported NEEDS_INPUT, burning a full attempt to learn something the queue
 # already knew. `task_ready` makes that check structural instead.
 
-# Prints the maker for a task file (default: codex).
+# Prints the maker for a task file (default: the first entry in HARNESSES).
 task_maker() {
   local f="$1" m
   m=$(sed -n 's/^maker: *//p' "$f" | head -n1)
-  echo "${m:-codex}"
+  echo "${m:-${HARNESSES[0]}}"
 }
+
+# Warn (not fatal) about any pending task whose maker isn't a currently configured harness —
+# otherwise it just sits in pending/ forever with no error, since pick_ready_task_for_maker below
+# only ever looks at configured harnesses.
+for f in "$PENDING"/*.md; do
+  [[ -f "$f" ]] || continue
+  m=$(task_maker "$f")
+  known=0
+  for h in "${HARNESSES[@]}"; do [[ "$h" == "$m" ]] && known=1 && break; done
+  (( known )) || log "warning: $(basename "$f") has maker '$m', which is not in LOOP_KIT_HARNESSES (${HARNESSES[*]}) — it will never be picked up"
+done
 
 # Prints the task's complexity tier for maker model selection (default: default). A task file
 # opts into a non-default tier with `complexity: quick` or `complexity: gnarly` in its
@@ -316,17 +315,17 @@ run_task_pipeline() {
     return
   fi
 
-  # `network_access: true` opts a task's codex maker step out of the default network-denied
-  # sandbox — needed for tasks whose acceptance criteria require hitting a live local service
-  # (e.g. docker-compose'd Lakekeeper/Postgres) rather than a mock. Scoped per-task, not global:
-  # everything else still runs with network denied by default. This does not bypass the
-  # sensitive-path gate — a task can be both network_access and sensitive, and still lands in
-  # blocked/ for human sign-off.
+  # `network_access: true` opts a task's maker step out of a network-denied sandbox, for tasks
+  # whose acceptance criteria require hitting a live local service (e.g. docker-compose'd
+  # containers) rather than a mock. Passed to every harness's harness_maker_run — only adapters
+  # with an actual sandbox network toggle (codex's is the built-in example) honor it; others
+  # no-op. Scoped per-task, not global. This does not bypass the sensitive-path gate — a task can
+  # be both network_access and sensitive, and still lands in blocked/ for human sign-off.
   network_access=$(sed -n 's/^network_access: *//p' "$task_file" | head -n1)
 
-  # Drives which model+effort the maker branches below select (see the CODEX_MAKER_*/
-  # CLAUDE_MAKER_* tiers near the top of the file) — computed once per task, not per attempt,
-  # since a task's declared complexity doesn't change across retries.
+  # Passed to harness_maker_run so each adapter can pick its own model/effort per tier (see
+  # loop/harnesses/*.sh) — computed once per task, not per attempt, since a task's declared
+  # complexity doesn't change across retries.
   complexity=$(task_complexity "$task_file")
 
   attempt=0
@@ -337,52 +336,16 @@ run_task_pipeline() {
     local prompt_file="$task_log/attempt-$attempt-maker-prompt.md"
     render "$ROOT/loop/task_prompt.tpl.md" "$task_id" "$task_file" "$branch" "$failure_file" > "$prompt_file"
 
-    local backoff_scan_file="" maker_final maker_status
-    if [[ "$maker" == "claude" ]]; then
-      local claude_maker_model="$CLAUDE_MAKER_MODEL_DEFAULT" claude_maker_effort="$CLAUDE_MAKER_EFFORT_DEFAULT"
-      case "$complexity" in
-        quick)  claude_maker_model="$CLAUDE_MAKER_MODEL_QUICK";  claude_maker_effort="$CLAUDE_MAKER_EFFORT_QUICK" ;;
-        gnarly) claude_maker_model="$CLAUDE_MAKER_MODEL_GNARLY"; claude_maker_effort="$CLAUDE_MAKER_EFFORT_GNARLY" ;;
-      esac
-      log "  $task_id attempt $attempt: claude maker ($claude_maker_model, effort=$claude_maker_effort, complexity=$complexity)"
-      maker_final="$task_log/attempt-$attempt-claude-maker.md"
-      # No OS-level sandbox equivalent to codex's -s workspace-write for claude as a maker —
-      # relies on worktree isolation + the review step instead.
-      (cd "$worktree" && claude -p --model "$claude_maker_model" --effort "$claude_maker_effort" --dangerously-skip-permissions --add-dir "$ROOT/.git" < "$prompt_file") > "$maker_final" 2>&1
-      maker_status=$?
-      backoff_scan_file="$maker_final"
-    elif [[ "$maker" == "cursor" ]]; then
-      log "  $task_id attempt $attempt: cursor-agent maker${CURSOR_MODEL:+ ($CURSOR_MODEL)}"
-      maker_final="$task_log/attempt-$attempt-cursor-maker.jsonl"
-      # Also no OS-level sandbox equivalent here — same caveat as claude above.
-      # stream-json + stream-partial-output (rather than plain text, which buffers everything
-      # until the process exits) so a `timeout`-killed long-running attempt still leaves a
-      # readable trail of what it was doing, instead of an empty file.
-      local cursor_args=(-p --force --output-format stream-json --stream-partial-output --workspace "$worktree")
-      [[ -n "$CURSOR_MODEL" ]] && cursor_args+=(--model "$CURSOR_MODEL")
-      (cd "$worktree" && timeout "$CURSOR_MAKER_TIMEOUT" cursor-agent "${cursor_args[@]}" < "$prompt_file") > "$maker_final" 2>&1
-      maker_status=$?
-      backoff_scan_file="$maker_final"
-    else
-      local codex_maker_model="$CODEX_MAKER_MODEL_DEFAULT" codex_maker_effort="$CODEX_MAKER_EFFORT_DEFAULT"
-      case "$complexity" in
-        quick)  codex_maker_model="$CODEX_MAKER_MODEL_QUICK";  codex_maker_effort="$CODEX_MAKER_EFFORT_QUICK" ;;
-        gnarly) codex_maker_model="$CODEX_MAKER_MODEL_GNARLY"; codex_maker_effort="$CODEX_MAKER_EFFORT_GNARLY" ;;
-      esac
-      log "  $task_id attempt $attempt: codex exec ($codex_maker_model, effort=$codex_maker_effort, complexity=$complexity)"
-      maker_final="$task_log/attempt-$attempt-codex-final.md"
-      # --add-dir for $ROOT/.git: a worktree's index/HEAD lock lives under
-      # <main-repo>/.git/worktrees/<name>/, outside the worktree's own directory tree, so
-      # workspace-write alone can't write it and `git commit` fails inside the sandbox without this.
-      local codex_args=(exec -s workspace-write -C "$worktree" --add-dir "$ROOT/.git" --json -o "$maker_final" \
-        -m "$codex_maker_model" -c "model_reasoning_effort=\"$codex_maker_effort\"")
-      [[ "$network_access" == "true" ]] && codex_args+=(-c sandbox_workspace_write.network_access=true)
-      codex "${codex_args[@]}" - < "$prompt_file" > "$task_log/attempt-$attempt-codex.jsonl" 2>&1
-      maker_status=$?
-      # Codex's -o file only captures the last message on a clean finish; a hard failure (e.g.
-      # a usage-limit error) shows up in the --json event stream instead, so scan that.
-      backoff_scan_file="$task_log/attempt-$attempt-codex.jsonl"
-    fi
+    # Source the maker's adapter immediately before calling it (see loop/harnesses/
+    # TEMPLATE.sh.example) — every adapter defines the same function names, so whichever was
+    # sourced most recently is the one that runs. Deliberately re-sourced every attempt rather
+    # than once outside the loop: keeps this correct even though the same task_pipeline process
+    # will later source a *different* adapter for the reviewer step below.
+    source "$ROOT/loop/harnesses/$maker.sh"
+    local maker_final="$task_log/attempt-$attempt-maker-$maker.log"
+    log "  $task_id attempt $attempt: $maker maker"
+    harness_maker_run "$worktree" "$prompt_file" "$maker_final" "$complexity" "$network_access"
+    local maker_status=$?
 
     # The maker was told to write this relative to its own cwd, i.e. inside the worktree, not $ROOT.
     if [[ -f "$worktree/loop/queue/in_progress/${task_id}.NEEDS_INPUT.md" ]]; then
@@ -392,7 +355,7 @@ run_task_pipeline() {
     fi
 
     if (( maker_status != 0 )); then
-      record_backoff "$maker" "$backoff_scan_file"
+      record_backoff "$maker" "$maker_final"
       failure_file="$maker_final"
       log "  $task_id: $maker exited $maker_status, will retry if budget remains"
       continue
@@ -424,52 +387,24 @@ run_task_pipeline() {
       break
     fi
 
-    # Fixed review cycle so no model ever grades its own homework: codex -> claude -> cursor ->
-    # codex. `maker` here is who implemented; `reviewer` is the next model in the cycle.
-    local reviewer
-    case "$maker" in
-      claude) reviewer="cursor" ;;
-      cursor) reviewer="codex" ;;
-      *)      reviewer="claude" ;;  # codex (default maker) is reviewed by claude
-    esac
+    # Reviewer is the next harness after $maker in the HARNESSES ring (see reviewer_for() near
+    # the top of this file) — generalizes what used to be a fixed codex->claude->cursor->codex
+    # cycle to any ordered list of >=2 configured harnesses.
+    local reviewer; reviewer=$(reviewer_for "$maker")
 
-    # One shared review_prompt.tpl.md for all three reviewers (see run.sh's render()) — the only
-    # thing that actually differs between them is how each CLI's read-only mode gets described,
-    # which is what REVIEWER_MODE_NOTE below captures per reviewer.
-    local review_prompt review_out review_backoff_file
-    if [[ "$reviewer" == "codex" ]]; then
-      log "  $task_id attempt $attempt: codex review ($maker was the maker)"
-      review_prompt="$task_log/attempt-$attempt-codex-review-prompt.md"
-      review_out="$task_log/attempt-$attempt-codex-review.md"
-      local review_events="$task_log/attempt-$attempt-codex-review.jsonl"
-      local codex_mode_note="Treat this as a read-only review pass: you may run build/lint/test/\`git diff\` commands to verify claims, but do not edit any files or make any commits."
-      render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$codex_mode_note" > "$review_prompt"
-      local codex_review_args=(exec review --base "$BASE_BRANCH" --json -o "$review_out")
-      [[ -n "$CODEX_MODEL" ]] && codex_review_args+=(-m "$CODEX_MODEL")
-      (cd "$worktree" && codex "${codex_review_args[@]}" - < "$review_prompt") > "$review_events" 2>&1
-      review_backoff_file="$review_events"
-    elif [[ "$reviewer" == "cursor" ]]; then
-      log "  $task_id attempt $attempt: cursor-agent review ($maker was the maker)"
-      review_prompt="$task_log/attempt-$attempt-cursor-review-prompt.md"
-      review_out="$task_log/attempt-$attempt-cursor-review.md"
-      local cursor_mode_note="You are running in \`plan\` mode: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
-      render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$cursor_mode_note" > "$review_prompt"
-      local cursor_review_args=(-p --force --output-format text --mode plan --workspace "$worktree")
-      [[ -n "$CURSOR_MODEL" ]] && cursor_review_args+=(--model "$CURSOR_MODEL")
-      (cd "$worktree" && cursor-agent "${cursor_review_args[@]}" < "$review_prompt") > "$review_out" 2>&1
-      review_backoff_file="$review_out"
-    else
-      log "  $task_id attempt $attempt: claude review ($maker was the maker)"
-      review_prompt="$task_log/attempt-$attempt-claude-prompt.md"
-      review_out="$task_log/attempt-$attempt-claude-review.md"
-      local claude_mode_note="You are running in \`plan\` permission mode: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
-      render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$claude_mode_note" > "$review_prompt"
-      (cd "$worktree" && claude -p --model "$CLAUDE_MODEL" --permission-mode plan < "$review_prompt") > "$review_out" 2>&1
-      review_backoff_file="$review_out"
-    fi
+    # Source the reviewer's adapter and render the one shared review_prompt.tpl.md — the only
+    # thing that differs between reviewers is the {{REVIEWER_MODE_NOTE}} line describing that
+    # CLI's own read-only mode, which the adapter itself supplies.
+    source "$ROOT/loop/harnesses/$reviewer.sh"
+    local review_prompt="$task_log/attempt-$attempt-review-prompt.md"
+    local review_out="$task_log/attempt-$attempt-review-$reviewer.log"
+    local reviewer_mode_note; reviewer_mode_note=$(harness_reviewer_mode_note)
+    render "$ROOT/loop/review_prompt.tpl.md" "$task_id" "$task_file" "$branch" "" "$maker" "$REVIEW_BREAK_ATTEMPTS" "$reviewer_mode_note" > "$review_prompt"
+    log "  $task_id attempt $attempt: $reviewer review ($maker was the maker)"
+    harness_reviewer_run "$worktree" "$review_prompt" "$review_out" "$BASE_BRANCH"
 
-    if grep -qiE 'usage limit|rate.?limit|quota exceeded|resource.?exhausted|429 ' "$review_backoff_file" 2>/dev/null; then
-      record_backoff "$reviewer" "$review_backoff_file"
+    if grep -qiE 'usage limit|rate.?limit|quota exceeded|resource.?exhausted|429 ' "$review_out" 2>/dev/null; then
+      record_backoff "$reviewer" "$review_out"
       log "  $task_id: $reviewer review hit a usage/rate limit — blocking for human rather than misreading this as no verdict"
       outcome="blocked: $reviewer review hit a usage/rate limit"
       break
@@ -504,12 +439,12 @@ run_task_pipeline() {
 #
 # Previously this processed exactly one task start-to-finish (claim -> worktree -> attempts ->
 # verify -> review -> merge) before even looking at the next. Since each task already has a fixed
-# maker (codex/claude/cursor) and those are three independent accounts/tools, there's no reason
-# codex, claude, and cursor can't all be working on different ready tasks at the same time instead
-# of two of them sitting idle while the third one runs. Claiming (moving pending -> in_progress)
-# stays synchronous in the controller, one maker lane at a time, before anything is backgrounded —
-# that's what keeps this safe; only the maker/verify/review work itself (run_task_pipeline) runs
-# concurrently, and merging into $BASE_BRANCH stays serialized in the controller after `wait`.
+# maker and each configured harness is an independent account/tool, there's no reason every
+# harness in HARNESSES can't be working on a different ready task at the same time instead of
+# the rest sitting idle while one runs. Claiming (moving pending -> in_progress) stays synchronous
+# in the controller, one maker lane at a time, before anything is backgrounded — that's what keeps
+# this safe; only the maker/verify/review work itself (run_task_pipeline) runs concurrently, and
+# merging into $BASE_BRANCH stays serialized in the controller after `wait`.
 
 consecutive_blocked=0
 iteration=0
@@ -518,7 +453,7 @@ while (( iteration < MAX_ITERATIONS )); do
   declare -A batch_task_id=() batch_task_name=()
   batch_size=0
 
-  for maker in "${MAKERS[@]}"; do
+  for maker in "${HARNESSES[@]}"; do
     (( iteration + batch_size >= MAX_ITERATIONS )) && break
 
     if is_backed_off "$maker"; then
@@ -554,9 +489,9 @@ while (( iteration < MAX_ITERATIONS )); do
   done
   wait
 
-  # Merge phase: strictly serial, fixed maker order, so only one process ever touches
+  # Merge phase: strictly serial, fixed harness order, so only one process ever touches
   # $BASE_BRANCH at a time and results land in the log/console in a deterministic order.
-  for maker in "${MAKERS[@]}"; do
+  for maker in "${HARNESSES[@]}"; do
     [[ -n "${batch_task_id[$maker]:-}" ]] || continue
     task_id="${batch_task_id[$maker]}"
     task_name="${batch_task_name[$maker]}"
@@ -587,7 +522,7 @@ while (( iteration < MAX_ITERATIONS )); do
 
     if (( consecutive_blocked >= 3 )); then
       unset batch_task_id batch_task_name
-      die "3 tasks in a row ended up blocked. That usually means the queue or the spec is ambiguous, not that the tasks are hard. Stopping for you to look at loop/queue/blocked/ before burning more Codex budget."
+      die "3 tasks in a row ended up blocked. That usually means the queue or the spec is ambiguous, not that the tasks are hard. Stopping for you to look at loop/queue/blocked/ before burning more budget."
     fi
   done
 

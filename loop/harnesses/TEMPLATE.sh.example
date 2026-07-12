@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Template for a new harness adapter. Copy this to loop/harnesses/<name>.sh (or run
+# `loop/new_harness.sh <name>` to scaffold it), fill in the TODOs, then add <name> to
+# LOOP_KIT_HARNESSES in loop/loop.config.sh. <name> here must exactly match both this file's
+# name (without .sh) and every `maker: <name>` value used in task frontmatter.
+#
+# Contract every adapter must satisfy — run.sh sources this file immediately before each call it
+# makes into it, so it's expected (and safe) for multiple adapter files to define functions with
+# these same names; whichever was sourced most recently wins, and run.sh always re-sources right
+# before calling.
+#
+#   harness_maker_run WORKTREE PROMPT_FILE OUTPUT_FILE COMPLEXITY NETWORK_ACCESS
+#     Run this harness's CLI as a maker: read the rendered task prompt from PROMPT_FILE (usually
+#     piped to the CLI's stdin), execute with $WORKTREE as the working directory/workspace, and
+#     write everything useful for (a) a human reading a retry prompt and (b) usage-limit/backoff
+#     text-scanning to OUTPUT_FILE. Return the CLI's exit status — a non-zero status is treated
+#     as a failed attempt and retried. COMPLEXITY is "default"/"quick"/"gnarly" (see a task's
+#     `complexity:` frontmatter) — map it to whichever model/effort this harness supports, or
+#     ignore it if this harness has nothing to tier. NETWORK_ACCESS is "true" or empty, from a
+#     task's `network_access:` frontmatter — honor it if this harness has a sandbox network
+#     toggle, no-op otherwise.
+#
+#   harness_reviewer_run WORKTREE PROMPT_FILE OUTPUT_FILE BASE_BRANCH
+#     Same shape, but run this harness's CLI in a read-only/plan review mode against the diff in
+#     $WORKTREE relative to $BASE_BRANCH. The rendered review prompt (from review_prompt.tpl.md)
+#     already tells the model what to check and to end with a `VERDICT: ...` line — run.sh parses
+#     that line out of OUTPUT_FILE afterward, so nothing else needs to structure the output.
+#
+#   harness_reviewer_mode_note
+#     Echo one plain-text sentence describing how this harness's read-only/plan mode actually
+#     behaves (what it can and can't do). This gets substituted into review_prompt.tpl.md's
+#     {{REVIEWER_MODE_NOTE}} token so the reviewer model has an accurate description of its own
+#     operating constraints for this specific CLI.
+#
+# Available to every function without needing to be passed in: $ROOT (the main repo root — use
+# this for anything that needs to reach outside the worktree, e.g. a worktree's .git metadata,
+# since a worktree's index/HEAD lock lives under $ROOT/.git/worktrees/<name>/, outside the
+# worktree's own directory tree).
+#
+# Every harness listed in LOOP_KIT_HARNESSES is used as both a maker (for tasks whose `maker:`
+# names it) and a reviewer (the rotation is a ring over the whole list — see reviewer_for() in
+# run.sh), so it needs all three functions below, not just the one matching how you plan to use
+# it first.
+
+HARNESS_NAME="TODO"  # must match this file's name (without .sh)
+
+# TODO: model/effort config this harness reads from loop.config.sh, e.g.:
+# EXAMPLE_MODEL="${LOOP_KIT_EXAMPLE_MODEL:-some-default}"
+
+harness_maker_run() {
+  local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5"
+  # TODO: invoke your CLI here, e.g.:
+  # (cd "$worktree" && your-cli --some-flag < "$prompt_file") > "$output_file" 2>&1
+  echo "TODO: harness_maker_run not implemented for $HARNESS_NAME" > "$output_file"
+  return 1
+}
+
+harness_reviewer_run() {
+  local worktree="$1" prompt_file="$2" output_file="$3" base_branch="$4"
+  # TODO: invoke your CLI in read-only/plan mode here.
+  echo "TODO: harness_reviewer_run not implemented for $HARNESS_NAME" > "$output_file"
+  return 1
+}
+
+harness_reviewer_mode_note() {
+  echo "TODO: describe $HARNESS_NAME's read-only mode in one sentence."
+}

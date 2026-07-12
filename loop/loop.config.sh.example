@@ -1,0 +1,28 @@
+# Per-repo settings for the agentic loop kit. install.sh writes a copy of this into your
+# target repo's loop/loop.config.sh with your answers filled in — this file is just the
+# reference/example, and is safe to hand-edit after install too. loop/run.sh,
+# loop/verify.sh, and loop/new_task.sh each source loop.config.sh if it exists and fall
+# back to a generic default for anything unset, so a missing or partial config never
+# breaks the loop — it just runs with weaker guardrails until you tighten it.
+
+# Commands verify.sh runs after every maker attempt, from the repo root. Get these right
+# early — an empty gate makes every task's "acceptance criteria met" claim unverifiable.
+LOOP_KIT_BUILD_CMD="make build"
+LOOP_KIT_TEST_CMD="make test"
+
+# Extended-regex of path prefixes whose diffs always route to loop/queue/blocked/ for a
+# human, regardless of what verify or the checker say — governance-sensitive changes
+# don't get to self-approve. Add your own ADRs / provider-interface specs / schema-of-
+# record files alongside the generic defaults below.
+LOOP_KIT_SENSITIVE_PATTERN='^(deploy/|secrets|\.github/workflows/)'
+
+# Working-principles doc the task/review prompt templates point makers and reviewers at
+# (TDD requirement, architectural constraints, etc.). AGENTS.md is a common convention;
+# change this if your project uses a different name/location.
+LOOP_KIT_PRINCIPLES_DOC="AGENTS.md"
+
+# Path to a roadmap/milestone doc, relative to the repo root. If set and the file exists,
+# new_task.sh requires every task's `milestone:` field to match a `## <id> — ...` heading
+# in it. Set to an empty string to disable milestone validation entirely (some projects
+# don't track milestones as a doc).
+LOOP_KIT_ROADMAP_DOC="docs/roadmap.md"

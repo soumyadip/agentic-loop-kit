@@ -1,21 +1,20 @@
 # agentic-loop-kit
 
-A portable extraction of the maker/checker "loop" and three-model "council"
-system originally built for the Entrepot Data Platform project. It runs a
-queue of small, spec'd tasks through a maker (a CLI harness — Codex, Claude
-Code, and Cursor ship built in), gates each attempt behind a
-project-specific verify script, and hands every diff to a *different*
-harness to review before it can merge — so no model ever grades its own
-homework. `council.sh` is the separate, read-only counterpart: fan one
-design question out to several models in parallel and synthesize their
-independent answers yourself.
+A portable maker/checker "loop" and multi-model "council" system for
+running small, spec'd coding tasks through CLI coding agents with
+independent review. It runs a queue of small, spec'd tasks through a maker
+(a CLI harness — Codex, Claude Code, and Cursor ship built in), gates each
+attempt behind a project-specific verify script, and hands every diff to a
+*different* harness to review before it can merge — so no model ever
+grades its own homework. `council.sh` is the separate, read-only
+counterpart: fan one design question out to several models in parallel and
+synthesize their independent answers yourself.
 
-Nothing here is Entrepot-specific machinery — it's bash + markdown
-templates that shell out to CLIs already on your `$PATH`. The parts that
-*were* project-specific (build/test commands, which paths are
-governance-sensitive, which doc to validate milestones against, and now
-which harnesses/models are in the rotation) are now config, filled in by
-`install.sh`.
+This is bash + markdown templates that shell out to CLIs already on your
+`$PATH` — no project-specific machinery baked in. The parts that vary by
+project (build/test commands, which paths are governance-sensitive, which
+doc to validate milestones against, and which harnesses/models are in the
+rotation) are all config, filled in by `install.sh`.
 
 ## Harnesses are pluggable
 

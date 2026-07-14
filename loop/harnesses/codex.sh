@@ -57,7 +57,15 @@ harness_reviewer_run() {
   local model="${model_override:-$CODEX_CHECKER_MODEL}"
   echo "  codex exec review${model:+ ($model)}" >&2
   local events_file="${output_file}.events.jsonl"
-  local args=(exec review --base "$base_branch" --json -o "$output_file")
+  # Plain read-only `codex exec` with the rendered review prompt, NOT `codex exec review --base`:
+  # current codex CLIs reject combining `review --base <branch>` with a custom prompt
+  # ("the argument '--base <BRANCH>' cannot be used with '[PROMPT]'"), which makes every codex
+  # review die instantly with no parseable verdict — the reviewed task then wrongly blocks for a
+  # human. The rendered review_prompt.tpl.md already instructs the reviewer to diff against the
+  # base branch itself ("git diff main...HEAD in this worktree"), so dropping the built-in review
+  # subcommand loses nothing. ($base_branch is kept in the signature for the harness contract;
+  # the template, not a flag, now carries the base to diff against.)
+  local args=(exec -s read-only -C "$worktree" --json -o "$output_file")
   [[ -n "$model" ]] && args+=(-m "$model")
   (cd "$worktree" && codex "${args[@]}" - < "$prompt_file") > "$events_file" 2>&1
   local status=$?

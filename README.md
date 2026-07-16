@@ -83,16 +83,16 @@ genuinely per-project (see below) with sensible defaults; pass
 `--non-interactive` plus flags to script it. See `install.sh --help` for
 the full flag list.
 
-This copies `loop/` (including `loop/harnesses/`) and two Claude Code
-skills (`.claude/skills/council/`, `.claude/skills/new-task/`) into the
-target repo, writes `loop/loop.config.sh` with your answers, and does a
+This copies `loop/` (including `loop/harnesses/`) and Claude Code skills
+(`.claude/skills/council/`, `new-task/`, `skillopt-sleep/`, `project-loop/`)
+into the target repo, writes `loop/loop.config.sh` with your answers, and does a
 one-time text substitution of the `{{PLACEHOLDER}}` tokens baked into the
-prompt templates. It will not touch an existing `loop/loop.config.sh`
-unless you pass `--force` — re-running install.sh to pick up a kit update
-won't clobber settings you've already tuned. If you list a harness that
-isn't one of the three built-ins, install still completes but tells you to
-run `loop/new_harness.sh <name>` in the target repo afterward — a CLI this
-kit has never seen needs a human to write its ~20-line adapter once.
+prompt templates. If `loop/loop.config.sh` already exists, a plain re-run
+refuses — use `--update` (alias `--upgrade`) to refresh kit-managed files
+while keeping that config, or `--force` to overwrite config too. If you list a
+harness that isn't one of the three built-ins, install still completes but
+tells you to run `loop/new_harness.sh <name>` in the target repo afterward —
+a CLI this kit has never seen needs a human to write its ~20-line adapter once.
 
 ## What's actually per-project (the customization checklist)
 
@@ -146,7 +146,11 @@ kit has never seen needs a human to write its ~20-line adapter once.
    postmortem action item. This is where a lot of the system's real value
    compounds over time, and it's deliberately left as a TODO rather than
    auto-generated, because generic advice here is much weaker than a
-   lesson your project actually learned.
+   lesson your project actually learned. Optionally, Microsoft SkillOpt-Sleep
+   (`loop/skillopt_sleep.sh`) can propose gated edits to the LEARNED block
+   of `.claude/skills/project-loop/SKILL.md` from `loop/log/` evidence — see
+   `loop/README.md`'s "SkillOpt-Sleep" section; still human-adopted, not
+   auto-written into the mandate.
 
 ## Layout of this kit
 
@@ -160,6 +164,10 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
   council.sh                the independent multi-model advisory fan-out
   new_task.sh                scaffolds a new queue task file
   new_harness.sh             scaffolds a new loop/harnesses/<name>.sh adapter
+  skillopt_export.sh         export loop/log + queue outcomes → SkillOpt-Sleep tasks JSON
+  skillopt_sleep.sh          wrapper: export → skillopt-sleep dry-run/run/status/adopt
+  skillopt_trigger.sh        activity triggers from run.sh (remind/dry-run/run; never auto-adopt)
+  skillopt-sleep.config.json.example   optional ~/.skillopt-sleep/config.json starter
   loop.config.sh.example     documents every LOOP_KIT_* setting
   task_prompt.tpl.md          single maker prompt template, shared by every harness
   review_prompt.tpl.md        review prompt for queue tasks
@@ -176,6 +184,8 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
 skills/
   council/SKILL.md           Claude Code skill, thin pointer to council.sh
   new-task/SKILL.md          Claude Code skill, thin pointer to new_task.sh
+  skillopt-sleep/SKILL.md    Claude Code skill, thin pointer to skillopt_sleep.sh
+  project-loop/SKILL.md      trainable project skill (SkillOpt-Sleep LEARNED target)
 ```
 
 `loop/README.md` is the full operational writeup (queue semantics, retry/
@@ -190,6 +200,20 @@ It's not a hosted service, a package you `npm install`, or something with
 a stable API to version against — it's a copy-and-own starter kit. After
 `install.sh` runs, the copy in your target repo is yours; there's no live
 link back to this kit unless you build one yourself (git subtree, a sync
-script, whatever fits). Pulling in a kit update later means re-running
-`install.sh --force` (which overwrites the scripts/templates but asks
-before touching your config) or diffing by hand.
+script, whatever fits). Pulling in a kit update later:
+
+```sh
+./install.sh /path/to/your-repo --update    # or --upgrade
+```
+
+That refreshes scripts, prompt templates, built-in harness adapters, docs,
+and thin skills (`council`, `new-task`, `skillopt-sleep`), re-applies
+install-time `{{PLACEHOLDER}}` substitution from your existing config, and
+appends any newly introduced `LOOP_KIT_*` keys that are still missing.
+It **keeps** `loop/loop.config.sh`, leaves `queue/`/`log/`/`state/` alone,
+does not overwrite `review_mandate.partial.md` or
+`.claude/skills/project-loop/SKILL.md` when those already exist (so red-team
+and LEARNED customizations survive), and does not delete custom
+`loop/harnesses/<name>.sh` adapters you scaffolded. Use `--force` only when
+you intentionally want a regenerated config (then restore tuned settings
+from git).

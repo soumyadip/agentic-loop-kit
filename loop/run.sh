@@ -519,6 +519,8 @@ while (( iteration < MAX_ITERATIONS )); do
         git -C "$ROOT" worktree remove -f "$worktree"
         consecutive_blocked=0
         log "  $task_id: merged and marked done"
+        # When run-end evaluation is disabled, check the SkillOpt threshold after each done.
+        bash "$ROOT/loop/skillopt_trigger.sh" after-done || true
       else
         log "  $task_id: merge conflict — blocking for human instead of forcing it"
         mv "$task_file" "$BLOCKED/$task_name" 2>/dev/null || true
@@ -542,3 +544,4 @@ while (( iteration < MAX_ITERATIONS )); do
 done
 
 log "Stopped after $iteration task(s) this run. pending=$(find "$PENDING" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ') blocked=$(find "$BLOCKED" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ') done=$(find "$DONE" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
+bash "$ROOT/loop/skillopt_trigger.sh" run-end || true

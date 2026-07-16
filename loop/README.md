@@ -23,9 +23,14 @@ loop/queue/blocked/      automated path failed twice, or the task touches a sens
 loop/queue/done/         merged
 loop/log/<task-id>/      full transcript of every attempt: maker output, verify output, review
 loop/state/backoff.txt   per-model usage-limit cooldowns, reactively recorded (see Checker above)
+loop/state/skillopt-tasks.json   SkillOpt-Sleep export of loop evidence (see SkillOpt-Sleep below)
+loop/state/skillopt-trigger.json watermark for activity triggers (done count since last fire)
 loop/loop.config.sh      per-repo settings (build/test commands, sensitive-path regex, which harnesses/models, etc.) — see loop.config.sh.example
 loop/run.sh              the driver — no per-harness logic; dispatches to loop/harnesses/<name>.sh
 loop/verify.sh           the automated gate — put your project's real build/lint/test/typecheck commands in loop.config.sh
+loop/skillopt_export.sh  convert loop/log + queue → SkillOpt-Sleep tasks JSON
+loop/skillopt_sleep.sh   wrapper around skillopt-sleep (export → gate → stage → adopt)
+loop/skillopt_trigger.sh activity-based SkillOpt nudge/auto-stage from run.sh (config-driven)
 loop/task_prompt.tpl.md      one template, rendered per task and handed to whichever maker is running it
 loop/review_prompt.tpl.md    one template, rendered per review and handed to whichever harness is checking
 loop/harnesses/<name>.sh     one adapter per harness in LOOP_KIT_HARNESSES/LOOP_KIT_COUNCIL_HARNESSES — codex.sh, claude.sh, cursor.sh, opencode.sh ship built in
@@ -83,3 +88,71 @@ Also optional: `depends_on: [T001, T002]` (default `[]`) — the picker only cla
 `loop/council.sh <question-file.md>` is the read-only counterpart to the maker/checker loop above: it fans a single question out to several independent LLMs in parallel and saves each answer to `loop/council/log/<timestamp>-<slug>/`, for a human (or a follow-up agent session) to synthesize into a design doc/decision record. Nothing here writes to your tracked docs — reconciling the answers into an actual decision is a separate, deliberate step.
 
 Who's asked is config, not code — `LOOP_KIT_COUNCIL_HARNESSES` in `loop.config.sh` (default `codex opencode claude`), the same space-separated `harness`/`harness:model` member-spec syntax as `LOOP_KIT_HARNESSES`. Unlike the maker/checker ring, council members don't need to be distinct or number ≥2 — there's no self-review adjacency to protect when every member answers independently with no visibility into the others, just diminishing value in asking the same member twice. Each member's harness portion needs a `loop/harnesses/<name>.sh` adapter implementing `harness_council_run` (see `loop/harnesses/TEMPLATE.sh.example`) — codex, claude, cursor, and opencode all ship one. `COUNCIL_SKIP="member member"` (space-separated, matching entries in `LOOP_KIT_COUNCIL_HARNESSES` exactly) skips specific members for one run without editing config. See the script's own header comment for the full usage and env vars.
+
+## SkillOpt-Sleep
+
+Optional offline companion that refines `.claude/skills/project-loop/SKILL.md` from this loop's own scored evidence, using [Microsoft SkillOpt-Sleep](https://github.com/microsoft/SkillOpt) (pip package `skillopt`). It mirrors the kit's philosophy: frozen target agents, bounded text edits, held-out validation, and **human adopt** — nothing live changes until you say so.
+
+```text
+loop/log + queue outcomes
+  → loop/skillopt_export.sh   (SkillOpt-Sleep tasks JSON, reviewed:false)
+  → inspect / redact
+  → loop/skillopt_sleep.sh run --backend claude --i-reviewed
+  → staged proposal (LEARNED block only)
+  → loop/skillopt_sleep.sh adopt
+```
+
+### Setup
+
+```sh
+pip install skillopt          # or: uv tool install skillopt
+mkdir -p ~/.skillopt-sleep
+cp loop/skillopt-sleep.config.json.example ~/.skillopt-sleep/config.json
+# that starter keeps evolve_memory=false (skill only), gate on, auto_adopt off
+```
+
+Config knobs live in `loop.config.sh` as `LOOP_KIT_SKILLOPT_*` (skill path, default backend, edit budget, max tasks, preferences). See `loop.config.sh.example`.
+
+### Activity triggers (from `run.sh`)
+
+By default the loop **reminds** you when enough tasks have landed in `done/`
+since the last trigger — it does not spend API budget or adopt skill edits.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LOOP_KIT_SKILLOPT_TRIGGER` | `remind` | `off` \| `remind` \| `dry-run` \| `run` |
+| `LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE` | `10` | Fire after this many new `done/` tasks since last trigger (`0` = never) |
+| `LOOP_KIT_SKILLOPT_TRIGGER_ON_RUN_END` | `1` | Evaluate at end of `run.sh` (`0` = after each merge to done instead) |
+| `LOOP_KIT_SKILLOPT_TRIGGER_BACKEND` | `mock` | Backend for auto `dry-run`/`run` only; non-`mock` falls back to remind |
+
+Watermark: `loop/state/skillopt-trigger.json`. Escalate with `dry-run` or `run`
+to auto-export and stage; **adopt stays manual**. Sensitive repos: set
+`LOOP_KIT_SKILLOPT_TRIGGER=off`. Nightly cron (`loop/skillopt_sleep.sh schedule`)
+remains the separate time-based path.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `loop/skillopt_sleep.sh export` | Write `loop/state/skillopt-tasks.json` from `loop/log/` + queue |
+| `loop/skillopt_sleep.sh dry-run --backend mock` | Export + replay with no provider calls (plumbing check) |
+| `loop/skillopt_sleep.sh run --backend claude --i-reviewed` | Full cycle; stages a proposal if the gate accepts |
+| `loop/skillopt_sleep.sh status` | Latest staged proposal + night report |
+| `loop/skillopt_sleep.sh adopt` | Apply staged edits (backs up the prior skill first) |
+| `loop/skillopt_sleep.sh schedule` | Install SkillOpt-Sleep's nightly cron for this project |
+| `loop/skillopt_trigger.sh --self-test` | Exercise the activity-trigger watermark logic |
+
+`loop/skillopt_export.sh --self-test` exercises the exporter without needing `skillopt` installed.
+
+### Data boundary
+
+- Export is local and read-only over `loop/log/` / `loop/queue/`.
+- `mock` makes no provider calls.
+- A real backend (`claude`, `codex`, …) sends truncated task content to that provider. The wrapper **refuses** real backends until the tasks file has `"reviewed": true` (set via `--i-reviewed` only after you inspect/redact).
+- Prefer the loop-native `--tasks-file` path (default) over harvesting `~/.claude` / `~/.codex` chat transcripts. Pass `--no-tasks-file` only if you explicitly want transcript harvest.
+
+### What gets trained
+
+The managed skill is `LOOP_KIT_SKILLOPT_SKILL_PATH` (default `.claude/skills/project-loop/SKILL.md`). SkillOpt-Sleep only mutates the protected `<!-- SKILLOPT-SLEEP:LEARNED -->` block. Hand-written standing procedures and the SkillLens quality bar above that block stay yours. For recurring *reviewer* failure modes, still prefer adding numbered items to `review_mandate.partial.md` by hand — that file is injected into every review prompt; the project skill is the durable procedure layer around the ring.
+
+Claude Code users also get a thin `skillopt-sleep` skill under `.claude/skills/` that points at these scripts (same pattern as `council` / `new-task`).

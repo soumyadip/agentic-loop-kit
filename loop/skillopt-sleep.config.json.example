@@ -1,0 +1,11 @@
+{
+  "evolve_memory": false,
+  "evolve_skill": true,
+  "gate_mode": "on",
+  "auto_adopt": false,
+  "edit_budget": 4,
+  "dream_rollouts": 1,
+  "recall_k": 0,
+  "redact_secrets": true,
+  "managed_skill_name": "project-loop"
+}

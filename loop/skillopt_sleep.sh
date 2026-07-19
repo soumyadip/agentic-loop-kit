@@ -10,8 +10,8 @@
 #   claude   — logged-in Claude Code CLI (`claude -p`)
 #   codex    — logged-in Codex CLI (`codex exec`)
 #   handoff  — Sleep writes prompts; loop/skillopt_handoff.sh answers via
-#              harness_council_run (claude / codex / cursor). Needs SkillOpt
-#              newer than PyPI 0.2.0:
+#              harness_council_run (claude / codex / cursor / copilot / opencode).
+#              Needs SkillOpt newer than PyPI 0.2.0:
 #                pip install "git+https://github.com/microsoft/SkillOpt.git"
 #
 # Requires: python3, and `skillopt-sleep` on PATH (or `python -m skillopt_sleep`).

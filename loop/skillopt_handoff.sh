@@ -3,10 +3,10 @@
 #
 # Sleep writes pending model prompts under .skillopt-sleep-handoff/; this script
 # answers each with harness_council_run (fresh context, subscription CLI — Claude
-# Code, Codex, or Cursor) and re-invokes Sleep until the cycle finishes.
+# Code, Codex, Cursor, Copilot, or opencode) and re-invokes Sleep until the cycle finishes.
 #
-# No Anthropic/OpenAI API key is required. Cursor is supported only via this
-# handoff path (there is no native Sleep "cursor" backend upstream).
+# No Anthropic/OpenAI API key is required. Cursor / Copilot / opencode are supported via this
+# handoff path (there is no native Sleep backend for those CLIs upstream).
 #
 # Usage (normally invoked by loop/skillopt_sleep.sh when backend=handoff):
 #   loop/skillopt_handoff.sh <dry-run|run> [sleep args...]

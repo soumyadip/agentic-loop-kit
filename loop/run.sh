@@ -33,16 +33,18 @@ BASE_BRANCH="${LOOP_BASE_BRANCH:-main}"
 #
 # Each entry in this list is a *member*: either a bare harness name (`cursor`, using that
 # harness's own configured default model) or `harness:model` (e.g. `cursor:grok-4.5-high`,
-# pinning a specific model). This lets one multi-model-capable harness like `cursor` or
-# `opencode` fill several seats in the rotation by itself — `cursor:grok-4.5-high` and
-# `cursor:claude-4.5-sonnet` are two independent members even though they share one adapter and
-# one underlying CLI/account, because a diff made under one model family is still meaningfully
-# checked by a different one. Every member is used as both a maker (for tasks whose `maker:`
-# frontmatter names it) and a reviewer — the review cycle is a ring over this exact list (see
-# reviewer_for() below): each member is reviewed by the next one in order, wrapping around, so no
-# model ever grades its own homework. Needs >=2 *members* — not necessarily 2 distinct harnesses,
-# since two members of the same harness with different models are still independent seats — and
-# no two members may be byte-identical (that would be genuine self-review).
+# pinning a specific model). This lets one multi-model-capable harness like `cursor`,
+# `copilot`, or `opencode` fill several seats in the rotation by itself — e.g.
+# `cursor:grok-4.5-high` / `copilot:gpt-5.4` / `opencode:nvidia/z-ai/glm-5.2` paired with a
+# second pinned model on the same CLI are independent members even though they share one
+# adapter and one underlying account, because a diff made under one model family is still
+# meaningfully checked by a different one. Every member is used as both a maker (for tasks
+# whose `maker:` frontmatter names it) and a reviewer — the review cycle is a ring over this
+# exact list (see reviewer_for() below): each member is reviewed by the next one in order,
+# wrapping around, so no model ever grades its own homework. Needs >=2 *members* — not
+# necessarily 2 distinct harnesses, since two members of the same harness with different
+# models are still independent seats — and no two members may be byte-identical (that would
+# be genuine self-review).
 #
 # Configurable via LOOP_KIT_HARNESSES in loop.config.sh (space-separated member specs); each
 # member's harness portion (before any `:model`) must have a matching loop/harnesses/<name>.sh
@@ -50,12 +52,11 @@ BASE_BRANCH="${LOOP_BASE_BRANCH:-main}"
 # that isn't built in. Every adapter owns its own model/effort selection when no model is pinned
 # (reading its own LOOP_KIT_* vars); run.sh itself has no per-harness special-casing left.
 #
-# opencode is deliberately not a *built-in* harness here — it's reserved for loop/council.sh's
-# independent third-opinion role (see council.sh's own COUNCIL_OPENCODE_MODEL) by default.
-# Nothing stops you from writing an opencode adapter and adding members for it to this rotation
-# too (it's exactly the kind of multi-model-family harness this member-spec syntax is for).
+# Default rotation is codex/claude/cursor. Built-in adapters also ship for `copilot` and
+# `opencode` (full maker/checker/council) — add them to LOOP_KIT_HARNESSES when those CLIs are
+# installed (multi-model-family harnesses are exactly what harness:model is for).
 read -ra HARNESSES <<< "${LOOP_KIT_HARNESSES:-codex claude cursor}"
-(( ${#HARNESSES[@]} >= 2 )) || die "LOOP_KIT_HARNESSES must list at least 2 members (got: ${HARNESSES[*]:-none}) — a single member can never review its own work. Use harness:model entries (e.g. 'cursor:grok-4.5-high cursor:claude-4.5-sonnet') if you only want one harness/CLI."
+(( ${#HARNESSES[@]} >= 2 )) || die "LOOP_KIT_HARNESSES must list at least 2 members (got: ${HARNESSES[*]:-none}) — a single member can never review its own work. Use harness:model entries (e.g. 'cursor:grok-4.5-high cursor:claude-4.5-sonnet' or 'copilot:gpt-5.4 copilot:claude-sonnet-4.6') if you only want one harness/CLI."
 
 # Splits a member spec into its harness portion (before ':') — "cursor:grok-4.5-high" -> "cursor",
 # "codex" -> "codex".

@@ -33,14 +33,23 @@ hardcoded logic.
 **Member syntax**
 
 - Bare harness: `cursor` (uses that harness's project default model)
-- Pinned model: `cursor:grok-4.5-high`
+- Pinned model: `cursor:grok-4.5-high` / `copilot:gpt-5.4` / `opencode:nvidia/z-ai/glm-5.2`
 - One multi-model CLI can fill multiple seats, e.g.  
-  `LOOP_KIT_HARNESSES="cursor:grok-4.5-high cursor:claude-4.5-sonnet"`
+  `LOOP_KIT_HARNESSES="copilot:gpt-5.4 copilot:claude-sonnet-4.6"`
 - Need ≥2 members total (not necessarily ≥2 distinct harnesses)
 - No two members may be identical (that would be self-review)
 
-**Built-ins:** Codex, Claude Code, Cursor. Drop any subset, reorder, pin
-different models, or add a harness with `loop/new_harness.sh <name>`.
+**Built-ins:** Codex, Claude Code, Cursor, GitHub Copilot CLI, and opencode.
+Default rotation is `codex claude cursor` (doesn't require Copilot/opencode on
+day one). Drop any subset, reorder, pin different models, or add a harness with
+`loop/new_harness.sh <name>`.
+
+Multi-model CLIs (`cursor`, `copilot`, `opencode`) can fill multiple seats alone:
+
+```sh
+LOOP_KIT_HARNESSES="copilot:gpt-5.4 copilot:claude-sonnet-4.6"
+LOOP_KIT_HARNESSES="opencode:nvidia/z-ai/glm-5.2 opencode:opencode/big-pickle"
+```
 
 **Council** reuses the same adapters via `harness_council_run`, but is
 configured separately (`LOOP_KIT_COUNCIL_HARNESSES`). Different job: parallel
@@ -52,14 +61,16 @@ Install and authenticate only the CLIs you put in your rotation:
 
 | CLI | Role |
 |---|---|
-| [`codex`](https://github.com/openai/codex) | Built-in maker/checker |
-| [`claude`](https://claude.com/claude-code) | Built-in maker/checker |
-| [`cursor-agent`](https://cursor.com/cli) | Built-in maker/checker |
-| [`opencode`](https://opencode.ai) | Optional; council-only adapter by default (maker/checker are stubs — see `loop/README.md`) |
+| [`codex`](https://github.com/openai/codex) | Built-in maker/checker/council |
+| [`claude`](https://claude.com/claude-code) | Built-in maker/checker/council |
+| [`cursor-agent`](https://cursor.com/cli) | Built-in maker/checker/council (multi-model) |
+| [`copilot`](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) | Built-in maker/checker/council (multi-model; GitHub Copilot subscription) |
+| [`opencode`](https://opencode.ai) | Built-in maker/checker/council (multi-model; also default council member) |
 
 Also required: `python3`, `git` (worktrees — load-bearing), `bash` 4+.
 
-A 2-harness rotation (e.g. `codex claude`) only needs those two CLIs.
+A 2-harness rotation (e.g. `codex claude` or `copilot:gpt-5.4
+copilot:claude-sonnet-4.6`) only needs those CLIs.
 `LOOP_KIT_COUNCIL_HARNESSES` only needs the CLIs it names.
 
 ## Install into a project
@@ -114,12 +125,12 @@ writing `~/.skillopt-sleep/config.json` if missing. On `--update`, existing
 | Prompt | Config / flag | Why | Loop impact |
 |---|---|---|---|
 | Install package? | `--with-skillopt` / `--no-skillopt` | Without it, `skillopt_sleep.sh` cannot run | Optional; `run.sh` only nudges when TRIGGER is set |
-| Source | `pip` or `git` | Handoff landed after PyPI 0.2.0 — use `git` for Cursor/opencode | Which Sleep features work (subscription CLIs; no API keys) |
+| Source | `pip` or `git` | Handoff landed after PyPI 0.2.0 — use `git` for Cursor/Copilot/opencode | Which Sleep features work (subscription CLIs; no API keys) |
 | Backend | `LOOP_KIT_SKILLOPT_BACKEND` → `mock\|claude\|codex\|handoff` | Prefer logged-in CLIs over API keys | Default `--backend` for manual + auto dry-run/run |
 | Activity trigger | `LOOP_KIT_SKILLOPT_TRIGGER` → `remind` | Easy to forget; remind surfaces it without spend | `skillopt_trigger.sh` after done thresholds; **never auto-adopts** |
 | Every N done | `LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE` → `10` | Relative watermark matches real usage | `0` = never fire |
 | Trigger backend | `LOOP_KIT_SKILLOPT_TRIGGER_BACKEND` → `mock` | Auto paths should stay cheap until you opt in | Ignored for `remind` / `off` |
-| Handoff harness | `LOOP_KIT_SKILLOPT_HANDOFF_HARNESS` | Cursor/opencode aren't native Sleep backends | Used when backend is `handoff` |
+| Handoff harness | `LOOP_KIT_SKILLOPT_HANDOFF_HARNESS` | Cursor/Copilot/opencode aren't native Sleep backends | Used when backend is `handoff` |
 | Engine config | `~/.skillopt-sleep/config.json` | Sleep reads home-dir config | Does not change `loop.config.sh` |
 
 ### Not prompted (edit by hand)
@@ -154,7 +165,7 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
   council_prompt.tpl.md      council member prompt template
   harnesses/
     codex.sh, claude.sh, cursor.sh   built-in maker/checker/council adapters
-    opencode.sh                      council-only adapter (maker/checker left as TODO stubs)
+    copilot.sh, opencode.sh          multi-model maker/checker/council adapters
     TEMPLATE.sh.example              the adapter interface, documented
   README.md                  operational docs, copied into the target repo as loop/README.md
 skills/

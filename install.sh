@@ -15,7 +15,9 @@ KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILTIN_HARNESSES="codex claude cursor"
 # Built-in harness adapters always refreshed on --update; other harnesses/*.sh in the
 # target (user-scaffolded) are left alone unless they share a built-in name.
-BUILTIN_HARNESS_FILES="codex.sh claude.sh cursor.sh opencode.sh"
+# copilot + opencode are multi-model CLIs (full maker/checker/council); not in the default
+# rotation so a fresh install doesn't require those CLIs on day one.
+BUILTIN_HARNESS_FILES="codex.sh claude.sh cursor.sh opencode.sh copilot.sh"
 
 die() { echo "[install] $*" >&2; exit 1; }
 log() { echo "[install] $*"; }
@@ -85,11 +87,12 @@ Use --non-interactive plus flags to skip prompts.
                               Loop impact: maker frontmatter + reviewer_for() ring; each seat
                               needs loop/harnesses/<name>.sh.
 
-  --codex-model / --claude-model / --cursor-model
+  --codex-model / --claude-model / --cursor-model / --copilot-model / --opencode-model
                              default model for bare (unpinned) seats of that harness
                               Why: multi-model harnesses need a project default when you
                               don't write harness:model in LOOP_KIT_HARNESSES.
                               Loop impact: used for maker-default and checker unless overridden.
+                              Examples: copilot:gpt-5.4 / opencode:nvidia/z-ai/glm-5.2
 
   --council-harnesses "a b"  independent design opinions (no ring / no >=2 rule)
                               (default: codex opencode claude)
@@ -112,8 +115,9 @@ Use --non-interactive plus flags to skip prompts.
   --skillopt-trigger-backend mock|claude|codex|handoff  (default: mock)
                               Why: auto dry-run/run needs a backend; mock is safest.
   --skillopt-handoff-harness MEMBER
-                              harness that answers handoff prompts (e.g. cursor, opencode)
-                              Why: Cursor/opencode are not native Sleep backends.
+                              harness that answers handoff prompts
+                              (e.g. cursor, copilot, opencode, copilot:gpt-5.4)
+                              Why: Cursor/Copilot/opencode are not native Sleep backends.
                               Loop impact: --backend handoff → skillopt_handoff.sh.
   --skillopt-engine-config   copy loop/skillopt-sleep.config.json.example →
                               ~/.skillopt-sleep/config.json if missing
@@ -397,7 +401,7 @@ prompt_skillopt_settings() {
   ask_yn \
 "SkillOpt-Sleep refines .claude/skills/project-loop/SKILL.md from loop/log evidence
 (held-out gate; human adopt). Uses subscription CLIs (claude/codex) or handoff
-(cursor/opencode) — no API keys required for those paths.
+(cursor/copilot/opencode) — no API keys required for those paths.
 Why now: without the package, skillopt_sleep.sh cannot run.
 Loop impact: optional; run.sh only reminds/auto-stages if TRIGGER is set." \
     "Install SkillOpt Python package now? (y/n)" \
@@ -418,7 +422,7 @@ Loop impact: only affects which skillopt_sleep features work." \
   mock    — plumbing only
   claude  — Claude Code login/subscription
   codex   — Codex login/subscription
-  handoff — kit harness answers Sleep prompts (cursor/opencode/…)
+  handoff — kit harness answers Sleep prompts (cursor/copilot/opencode/…)
 Why: real refinement should use logged-in CLIs, not API keys.
 Loop impact: default --backend for manual + auto dry-run/run (via TRIGGER_BACKEND)." \
     "SkillOpt backend (mock|claude|codex|handoff)" "$skillopt_backend"
@@ -451,8 +455,8 @@ Loop impact: ignored for remind/off." \
 
   ask \
 "Member that answers --backend handoff prompts (empty = first LOOP_KIT_HARNESSES seat).
-Examples: cursor, cursor:grok-4.5-high, opencode, claude.
-Why: Cursor/opencode are not native SkillOpt backends — handoff uses harness_council_run.
+Examples: cursor, copilot, opencode, copilot:gpt-5.4, claude.
+Why: Cursor/Copilot/opencode are not native SkillOpt backends — handoff uses harness_council_run.
 Loop impact: only when backend or trigger-backend is handoff." \
     "SkillOpt handoff harness" "$skillopt_handoff_harness"
   skillopt_handoff_harness="$REPLY"
@@ -529,6 +533,8 @@ harnesses="$BUILTIN_HARNESSES"
 codex_model="gpt-5.6-terra"
 claude_model="sonnet"
 cursor_model="grok-4.5-high"
+copilot_model="gpt-5.4"
+opencode_model="nvidia/z-ai/glm-5.2"
 council_harnesses="codex opencode claude"
 non_interactive=0
 force=0
@@ -557,6 +563,8 @@ while [[ $# -gt 0 ]]; do
     --codex-model) codex_model="$2"; shift 2 ;;
     --claude-model) claude_model="$2"; shift 2 ;;
     --cursor-model) cursor_model="$2"; shift 2 ;;
+    --copilot-model) copilot_model="$2"; shift 2 ;;
+    --opencode-model) opencode_model="$2"; shift 2 ;;
     --council-harnesses) council_harnesses="$2"; shift 2 ;;
     --with-skillopt) skillopt_do_install=1; skillopt_flag_set=1; shift ;;
     --no-skillopt) skillopt_do_install=0; skillopt_flag_set=1; shift ;;
@@ -713,7 +721,9 @@ Loop impact: new_task.sh rejects unknown milestones when this file exists." \
 
   ask \
 "Maker/checker seats in review-ring order (space-separated). Need >=2.
-Use harness or harness:model (e.g. cursor:grok-4.5-high cursor:claude-4.5-sonnet).
+Use harness or harness:model (e.g. cursor:grok-4.5-high, copilot:gpt-5.4,
+opencode:nvidia/z-ai/glm-5.2). Multi-model CLIs (cursor/copilot/opencode) can
+fill multiple seats alone.
 Why: no model grades its own homework — each seat is reviewed by the next.
 Loop impact: run.sh maker routing + reviewer_for(); each harness needs an adapter." \
     "Harnesses (maker/checker ring)" "$harnesses"
@@ -750,6 +760,23 @@ Why: bare 'cursor' entries need a project default.
 Loop impact: LOOP_KIT_CURSOR_MODEL for maker and checker." \
           "  Default model for bare 'cursor' entries" "$cursor_model"
         cursor_model="$REPLY"
+        ;;
+      copilot)
+        ask \
+"Default model for bare 'copilot' seats (GitHub Copilot CLI id, e.g. gpt-5.4,
+claude-sonnet-4.6 — see \`copilot /model\` for your plan).
+Why: bare 'copilot' entries need a project default.
+Loop impact: LOOP_KIT_COPILOT_MODEL for maker and checker." \
+          "  Default model for bare 'copilot' entries" "$copilot_model"
+        copilot_model="$REPLY"
+        ;;
+      opencode)
+        ask \
+"Default model for bare 'opencode' seats (provider/model, e.g. nvidia/z-ai/glm-5.2).
+Why: bare 'opencode' entries need a project default.
+Loop impact: LOOP_KIT_OPENCODE_MODEL for maker and checker." \
+          "  Default model for bare 'opencode' entries" "$opencode_model"
+        opencode_model="$REPLY"
         ;;
       *) log "  '$h' has no built-in adapter — run 'loop/new_harness.sh $h' in the target repo after install." ;;
     esac
@@ -822,6 +849,12 @@ copy_kit_files "$target" "install"
       cursor)
         echo "LOOP_KIT_CURSOR_MODEL=\"${cursor_model}\""
         ;;
+      copilot)
+        echo "LOOP_KIT_COPILOT_MODEL=\"${copilot_model}\""
+        ;;
+      opencode)
+        echo "LOOP_KIT_OPENCODE_MODEL=\"${opencode_model}\""
+        ;;
     esac
   done
   echo "LOOP_KIT_COUNCIL_HARNESSES=\"${council_harnesses}\""
@@ -859,12 +892,13 @@ if [[ -n "$roadmap_doc" ]]; then
 else
   log "  4. Milestone gating disabled — new_task.sh will skip the roadmap check."
 fi
-log "  5. Install prerequisite CLIs for your chosen harnesses ($harnesses), and optionally"
-log "     opencode (for council.sh)."
+log "  5. Install prerequisite CLIs for your chosen harnesses ($harnesses)"
+log "     (codex / claude / cursor-agent / copilot / opencode as applicable)."
 log "  6. Seed loop/queue/pending/ (loop/new_task.sh <slug> <milestone>), then:"
 log "       cd $target && LOOP_MAX_ITERATIONS=1 loop/run.sh   # first supervised run"
 log "  7. SkillOpt-Sleep (configured above; TRIGGER=${skillopt_trigger}, BACKEND=${skillopt_backend}):"
 log "       loop/skillopt_sleep.sh dry-run --backend ${skillopt_backend}"
 log "       # after a few done/blocked tasks; human adopt only — never auto-merge skill edits"
+log "       # handoff examples: --backend handoff --handoff-harness copilot|cursor|opencode"
 log "  8. Later, pull kit updates (and re-prompt SkillOpt) with:"
 log "       $KIT_ROOT/install.sh $target --update"

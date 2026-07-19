@@ -18,10 +18,10 @@
 # *members*, same "harness" or "harness:model" syntax as LOOP_KIT_HARNESSES — see run.sh's
 # HARNESSES comment). Default: codex opencode claude. Each member's harness portion needs a
 # loop/harnesses/<name>.sh adapter implementing harness_council_run (see
-# loop/harnesses/TEMPLATE.sh.example) — this kit's codex/claude/cursor/opencode adapters all do.
-# Unlike LOOP_KIT_HARNESSES, members here don't need to be distinct or even >=2 of them — there's
-# no self-review adjacency concern for an independent-opinions fan-out, just diminishing value
-# in asking the same member twice.
+# loop/harnesses/TEMPLATE.sh.example) — this kit's codex/claude/cursor/copilot/opencode
+# adapters all do. Unlike LOOP_KIT_HARNESSES, members here don't need to be distinct or even
+# >=2 of them — there's no self-review adjacency concern for an independent-opinions fan-out,
+# just diminishing value in asking the same member twice.
 #
 # COUNCIL_SKIP="member member ..." (space-separated, matching entries in LOOP_KIT_COUNCIL_HARNESSES
 # exactly) skips those members for this run without editing config, e.g. COUNCIL_SKIP="opencode".

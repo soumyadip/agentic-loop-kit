@@ -14,7 +14,7 @@ Which CLIs (and models) sit in the rotation is **config**, not code:
 | Syntax | Meaning |
 |---|---|
 | `cursor` | Bare harness — uses that harness's project default model |
-| `cursor:grok-4.5-high` | Pin a specific model |
+| `cursor:grok-4.5-high` | Pin a specific model (same for `copilot:…` / `opencode:…`) |
 | ≥2 members | Required (not necessarily ≥2 distinct harnesses) |
 | Identical members | Forbidden (genuine self-review) |
 
@@ -22,10 +22,11 @@ One multi-model CLI can fill multiple seats:
 
 ```sh
 LOOP_KIT_HARNESSES="cursor:grok-4.5-high cursor:claude-4.5-sonnet"
+LOOP_KIT_HARNESSES="copilot:gpt-5.4 copilot:claude-sonnet-4.6"
 ```
 
 Each harness is `loop/harnesses/<name>.sh`. Built-ins: `codex`, `claude`,
-`cursor`. Add your own via `loop/new_harness.sh <name>` /
+`cursor`, `copilot`, `opencode`. Add your own via `loop/new_harness.sh <name>` /
 `TEMPLATE.sh.example`.
 
 - One atomic task per run, fresh context every time
@@ -34,9 +35,9 @@ Each harness is `loop/harnesses/<name>.sh`. Built-ins: `codex`, `claude`,
   identical for every harness; only the attempt step differs
 
 **Sandbox note (built-ins):** Codex runs with OS sandbox
-(`-s workspace-write`). Claude/Cursor have no equivalent here — lean on
-worktree isolation + review; reserve those makers for well-scoped,
-non-sensitive work.
+(`-s workspace-write`). Claude / Cursor / Copilot / opencode have no
+equivalent here — lean on worktree isolation + review; reserve those makers
+for well-scoped, non-sensitive work.
 
 ### Maker complexity tiers
 
@@ -70,20 +71,37 @@ coordinator — that would reintroduce self-grading):
 | Confirmed + high/critical | `request_changes` → back to maker |
 | Unconfirmed or low/medium | `block_human` → you decide |
 
-### opencode
+### Multi-model CLIs (cursor / copilot / opencode)
 
-Ships a **council-only** adapter. Maker/reviewer functions are TODO stubs
-on purpose — council (parallel, no cross-visibility) is a different job
-from the ring. You can fill those TODOs and add opencode to
-`LOOP_KIT_HARNESSES`; smoke-test first.
+These adapters front several model families through one CLI/account. Use
+`harness:model` to fill multiple ring seats (or council seats) without a
+second CLI:
+
+| Harness | CLI | Default model config | Maker mode | Reviewer / council |
+|---|---|---|---|---|
+| `cursor` | `cursor-agent` | `LOOP_KIT_CURSOR_MODEL` | write (`--force`) | `--mode plan` |
+| `copilot` | `copilot` (GitHub Copilot CLI) | `LOOP_KIT_COPILOT_MODEL` | `--allow-all-tools` | `--plan` |
+| `opencode` | `opencode` | `LOOP_KIT_OPENCODE_MODEL` | `--agent build --auto` | `--agent plan --auto` |
+
+Examples:
+
+```sh
+LOOP_KIT_HARNESSES="copilot:gpt-5.4 copilot:claude-sonnet-4.6"
+LOOP_KIT_HARNESSES="opencode:nvidia/z-ai/glm-5.2 opencode:opencode/big-pickle"
+LOOP_KIT_COUNCIL_HARNESSES="codex copilot:gpt-5.4 opencode"
+LOOP_KIT_SKILLOPT_HANDOFF_HARNESS="copilot"   # or copilot:claude-sonnet-4.6
+```
+
+Model ids for Copilot vary by plan — check `copilot /model` interactively.
+opencode models: `opencode models` (provider/model format).
 
 ### Usage-limit backoff
 
 No CLI exposes remaining quota. When output looks like a rate-limit hit,
 `run.sh` records a cooldown in `loop/state/backoff.txt`
 (`<harness> <until-epoch>`). Keyed by **harness**, not member — a Cursor
-limit blocks every `cursor:…` seat. Clear early by deleting the file or
-that harness's line.
+or Copilot limit blocks every `cursor:…` / `copilot:…` seat. Clear early by
+deleting the file or that harness's line.
 
 ### State
 
@@ -212,7 +230,7 @@ reconciling into a decision is a separate step.
 | `COUNCIL_SKIP="a b"` | Skip members for one run without editing config |
 
 Each member needs `harness_council_run` in its adapter (codex, claude,
-cursor, opencode all ship one).
+cursor, copilot, opencode all ship one).
 
 ## SkillOpt-Sleep
 
@@ -225,16 +243,16 @@ from this loop's scored evidence via
 validation, **human adopt** — nothing live until you say so.
 
 **Subscription-first:** use logged-in `claude` / `codex`, or `handoff`
-(Claude / Codex / **Cursor** via `harness_council_run`). No API keys
-required for those paths. SkillLens (research benchmark pipeline) is out
-of scope.
+(Claude / Codex / **Cursor** / **Copilot** / **opencode** via
+`harness_council_run`). No API keys required for those paths. SkillLens
+(research benchmark pipeline) is out of scope.
 
 ```text
 loop/log + queue outcomes
   → loop/skillopt_export.sh          (tasks JSON, reviewed:false)
   → inspect / redact
   → loop/skillopt_sleep.sh run --backend claude --i-reviewed
-     (or --backend handoff --handoff-harness cursor)
+     (or --backend handoff --handoff-harness copilot)
   → staged proposal (LEARNED block only)
   → loop/skillopt_sleep.sh adopt
 ```
@@ -246,7 +264,7 @@ loop/log + queue outcomes
 | `mock` | none | Plumbing / deterministic; default install value |
 | `claude` | Claude Code login | `claude -p` — no API key |
 | `codex` | Codex login | `codex exec` |
-| `handoff` | kit harness | Sleep writes prompts; `skillopt_handoff.sh` answers via `harness_council_run`. Needs SkillOpt newer than PyPI 0.2.0 |
+| `handoff` | kit harness | Sleep writes prompts; `skillopt_handoff.sh` answers via `harness_council_run` (claude / codex / cursor / copilot / opencode). Needs SkillOpt newer than PyPI 0.2.0 |
 
 Azure / OpenAI-compatible API backends exist upstream; not kit defaults.
 
@@ -295,6 +313,8 @@ time-based path.
 | `skillopt_sleep.sh dry-run --backend mock` | Export + replay, no model calls |
 | `skillopt_sleep.sh run --backend claude --i-reviewed` | Full cycle via Claude Code |
 | `skillopt_sleep.sh run --backend handoff --handoff-harness cursor --i-reviewed` | Full cycle via kit harness |
+| `skillopt_sleep.sh run --backend handoff --handoff-harness copilot --i-reviewed` | Full cycle via Copilot CLI |
+| `skillopt_sleep.sh run --backend handoff --handoff-harness opencode --i-reviewed` | Full cycle via opencode |
 | `skillopt_sleep.sh status` | Latest staged proposal + night report |
 | `skillopt_sleep.sh adopt` | Apply staged edits (backs up prior skill) |
 | `skillopt_sleep.sh schedule` | Install nightly cron for this project |

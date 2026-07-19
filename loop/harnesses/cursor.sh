@@ -7,6 +7,7 @@
 # e.g. `cursor:grok-4.5-high cursor:claude-4.5-sonnet` — since a diff made under one model
 # family is still meaningfully checked by a different one, even though both members share this
 # one adapter. See run.sh's HARNESSES comment for the harness:model member-spec syntax.
+# (Same multi-model pattern: `copilot` and `opencode`.)
 HARNESS_NAME="cursor"
 
 # cursor-agent's model slug already bakes in reasoning effort (e.g. grok-4.5-high), so one flat

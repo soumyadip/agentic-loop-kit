@@ -2,34 +2,63 @@
 # Harness adapter for opencode (https://opencode.ai). See TEMPLATE.sh.example for the interface
 # every adapter implements.
 #
-# Only harness_council_run is implemented below — that invocation (`opencode run --auto --agent
-# plan -m ... < prompt`) is exactly what this kit's council.sh has run in production since before
-# adapters existed, so it's proven. harness_maker_run/harness_reviewer_run are left as TODO
-# stubs: opencode fronts several model families like cursor-agent does, which would make it a
-# natural LOOP_KIT_HARNESSES member too, but write-mode/plan-mode flag behavior for that hasn't
-# been exercised by this kit — fill in the TODOs and smoke-test before trusting it as a maker or
-# checker (see loop/README.md's "opencode" bullet, and drop this comment once you have).
+# opencode fronts several model families through one CLI (provider/model slugs, e.g.
+# `nvidia/z-ai/glm-5.2`), which makes it a natural fit for filling more than one seat in
+# LOOP_KIT_HARNESSES by itself — e.g. `opencode:nvidia/z-ai/glm-5.2 opencode:opencode/big-pickle`
+# — since a diff made under one model is still meaningfully checked by a different one.
+# Also used by council.sh and SkillOpt handoff (`--handoff-harness opencode` or
+# `opencode:<provider/model>`).
+#
+# Agents used here (see `opencode agent list`):
+#   build — write-capable primary agent for maker attempts
+#   plan  — read-only / plan agent for reviewer + council
 HARNESS_NAME="opencode"
 
-# Model opencode-as-council-member uses, and how long council.sh waits for it.
-# LOOP_KIT_COUNCIL_TIMEOUT is shared across every council member's adapter.
-OPENCODE_COUNCIL_MODEL="${LOOP_KIT_OPENCODE_COUNCIL_MODEL:-nvidia/z-ai/glm-5.2}"
+# Default model for bare `opencode` members (maker + checker). Pin with harness:model to
+# override. Format is provider/model as accepted by `opencode run -m`.
+OPENCODE_MODEL="${LOOP_KIT_OPENCODE_MODEL:-nvidia/z-ai/glm-5.2}"
+OPENCODE_MAKER_TIMEOUT="${LOOP_KIT_OPENCODE_MAKER_TIMEOUT:-900}"
+# Optional --variant (provider-specific reasoning effort: high, max, minimal, …). Empty = omit.
+OPENCODE_VARIANT="${LOOP_KIT_OPENCODE_VARIANT:-}"
+OPENCODE_VARIANT_QUICK="${LOOP_KIT_OPENCODE_VARIANT_QUICK:-$OPENCODE_VARIANT}"
+OPENCODE_VARIANT_GNARLY="${LOOP_KIT_OPENCODE_VARIANT_GNARLY:-high}"
+
+# Council defaults to the same model as maker/checker unless overridden.
+OPENCODE_COUNCIL_MODEL="${LOOP_KIT_OPENCODE_COUNCIL_MODEL:-$OPENCODE_MODEL}"
 OPENCODE_COUNCIL_TIMEOUT="${LOOP_KIT_COUNCIL_TIMEOUT:-900}"
 
 harness_maker_run() {
   local worktree="$1" prompt_file="$2" output_file="$3" complexity="$4" network_access="$5" model_override="${6:-}"
-  echo "TODO: harness_maker_run not implemented for $HARNESS_NAME — see this file's header comment" > "$output_file"
-  return 1
+  local model="${model_override:-$OPENCODE_MODEL}"
+  local variant=""
+  if [[ -z "$model_override" ]]; then
+    case "$complexity" in
+      quick)  variant="$OPENCODE_VARIANT_QUICK" ;;
+      gnarly) variant="$OPENCODE_VARIANT_GNARLY" ;;
+      *)      variant="$OPENCODE_VARIANT" ;;
+    esac
+  fi
+  echo "  opencode maker ($model)${variant:+ variant=$variant} complexity=$complexity" >&2
+  # --auto: auto-approve permissions not explicitly denied (required for unattended maker).
+  # --agent build: write-capable primary. --dir: run inside the worktree.
+  # network_access is a no-op: opencode has no sandbox network toggle analogous to codex.
+  local args=(run --auto --agent build --dir "$worktree" -m "$model")
+  [[ -n "$variant" ]] && args+=(--variant "$variant")
+  (cd "$worktree" && timeout "$OPENCODE_MAKER_TIMEOUT" opencode "${args[@]}" < "$prompt_file") > "$output_file" 2>&1
 }
 
 harness_reviewer_run() {
   local worktree="$1" prompt_file="$2" output_file="$3" base_branch="$4" model_override="${5:-}"
-  echo "TODO: harness_reviewer_run not implemented for $HARNESS_NAME — see this file's header comment" > "$output_file"
-  return 1
+  local model="${model_override:-$OPENCODE_MODEL}"
+  echo "  opencode review ($model)" >&2
+  # --agent plan: read-only / plan mode (same as council). ($base_branch unused — the rendered
+  # review prompt tells the model to diff against the base itself.)
+  local args=(run --auto --agent plan --dir "$worktree" -m "$model")
+  (cd "$worktree" && opencode "${args[@]}" < "$prompt_file") > "$output_file" 2>&1
 }
 
 harness_reviewer_mode_note() {
-  echo "TODO: harness_reviewer_run isn't implemented for $HARNESS_NAME yet, so this note is unused until it is."
+  echo "You are running as opencode's \`plan\` agent: you can read files, search, and run read-only commands (build, lint, test, \`git diff\`), but you cannot edit anything."
 }
 
 harness_council_run() {

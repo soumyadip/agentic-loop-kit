@@ -55,10 +55,10 @@
 # Every harness listed in LOOP_KIT_HARNESSES is used as both a maker (for tasks whose `maker:`
 # names it) and a reviewer (the rotation is a ring over the whole list — see reviewer_for() in
 # run.sh), so it needs all three functions below, not just the one matching how you plan to use
-# it first. If this harness fronts multiple model families (like cursor-agent or opencode), you
-# don't need multiple adapter files for that — list it more than once in LOOP_KIT_HARNESSES with
-# different `harness:model` specs (e.g. `example:model-a example:model-b`) and MODEL_OVERRIDE
-# carries the rest.
+# it first. If this harness fronts multiple model families (like cursor-agent, copilot, or
+# opencode), you don't need multiple adapter files for that — list it more than once in
+# LOOP_KIT_HARNESSES with different `harness:model` specs (e.g. `example:model-a example:model-b`)
+# and MODEL_OVERRIDE carries the rest.
 
 HARNESS_NAME="TODO"  # must match this file's name (without .sh)
 

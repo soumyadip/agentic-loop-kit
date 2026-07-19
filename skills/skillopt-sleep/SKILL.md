@@ -2,19 +2,19 @@
 description: >
   Refine this project's loop skill from maker/checker evidence via Microsoft
   SkillOpt-Sleep using subscription CLIs (Claude Code / Codex) or kit handoff
-  (Cursor). Use when the user wants to export loop/log, run a dry-run or sleep
-  cycle, inspect a staged proposal, adopt gated skill edits, or schedule
-  offline self-evolution of .claude/skills/project-loop/SKILL.md. User-invoked
-  — must not auto-adopt. Does not require Anthropic/OpenAI API keys for
-  claude/codex/handoff backends.
+  (Cursor / Copilot / opencode). Use when the user wants to export loop/log,
+  run a dry-run or sleep cycle, inspect a staged proposal, adopt gated skill
+  edits, or schedule offline self-evolution of
+  .claude/skills/project-loop/SKILL.md. User-invoked — must not auto-adopt.
+  Does not require Anthropic/OpenAI API keys for claude/codex/handoff backends.
 argument-hint: [export | dry-run | run | status | adopt | schedule]
 disable-model-invocation: true
 ---
 
 This project wires Microsoft SkillOpt-Sleep into the maker/checker loop.
 Logic lives in `loop/skillopt_sleep.sh`, `loop/skillopt_export.sh`, and
-`loop/skillopt_handoff.sh` — this skill is a thin pointer so Codex/Cursor
-users can run the same commands from a terminal.
+`loop/skillopt_handoff.sh` — this skill is a thin pointer so Codex/Cursor/
+Copilot users can run the same commands from a terminal.
 
 Read `loop/README.md`'s "SkillOpt-Sleep" section if you haven't: it covers
 subscription backends, export → review → gate → adopt, and the data boundary.
@@ -33,6 +33,8 @@ not install or run it for this workflow.
    | Real cycle (Claude subscription) | `loop/skillopt_sleep.sh run --backend claude --i-reviewed` |
    | Real cycle (Codex subscription) | `loop/skillopt_sleep.sh run --backend codex --i-reviewed` |
    | Real cycle via Cursor harness | `loop/skillopt_sleep.sh run --backend handoff --handoff-harness cursor --i-reviewed` |
+   | Real cycle via Copilot harness | `loop/skillopt_sleep.sh run --backend handoff --handoff-harness copilot --i-reviewed` |
+   | Real cycle via opencode harness | `loop/skillopt_sleep.sh run --backend handoff --handoff-harness opencode --i-reviewed` |
    | See staged proposal | `loop/skillopt_sleep.sh status` |
    | Apply staged proposal | `loop/skillopt_sleep.sh adopt` |
    | Nightly cron | `loop/skillopt_sleep.sh schedule` |

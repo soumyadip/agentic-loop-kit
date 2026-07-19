@@ -34,15 +34,17 @@ LOOP_KIT_ROADMAP_DOC="docs/roadmap.md"
 # single member can never review its own work. A member is either a bare harness name
 # ("cursor", using that harness's own configured default model below) or "harness:model"
 # ("cursor:grok-4.5-high"), pinning a specific model — which lets one multi-model-capable
-# harness like cursor or opencode fill more than one seat by itself, e.g.:
+# harness like cursor, copilot, or opencode fill more than one seat by itself, e.g.:
 #   LOOP_KIT_HARNESSES="cursor:grok-4.5-high cursor:claude-4.5-sonnet"
-# is a valid 2-member rotation using only the cursor-agent CLI — a diff made under one model
-# family is still meaningfully checked by a different one, even sharing one adapter/account.
+#   LOOP_KIT_HARNESSES="copilot:gpt-5.4 copilot:claude-sonnet-4.6"
+#   LOOP_KIT_HARNESSES="opencode:nvidia/z-ai/glm-5.2 opencode:opencode/big-pickle"
+# is a valid 2-member rotation using only one CLI — a diff made under one model family is
+# still meaningfully checked by a different one, even sharing one adapter/account.
 # Every member's harness portion must have a matching loop/harnesses/<name>.sh adapter
 # (loop/harnesses/TEMPLATE.sh.example documents the interface; `loop/new_harness.sh <name>`
-# scaffolds a new one). This kit ships built-in adapters for codex, claude, and cursor — drop
-# any subset (still need >=2 members total), reorder them, repeat one with different pinned
-# models, or add your own (aider, gemini-cli, opencode, ...) alongside them.
+# scaffolds a new one). This kit ships built-in adapters for codex, claude, cursor, copilot,
+# and opencode — drop any subset (still need >=2 members total), reorder them, repeat one with
+# different pinned models, or add your own alongside them.
 LOOP_KIT_HARNESSES="codex claude cursor"
 
 # Each built-in adapter reads its own model config below; unset ones fall back to the
@@ -78,6 +80,22 @@ LOOP_KIT_HARNESSES="codex claude cursor"
 # LOOP_KIT_CURSOR_MODEL="grok-4.5-high"
 # LOOP_KIT_CURSOR_MAKER_TIMEOUT="900"
 
+# copilot — GitHub Copilot CLI (`copilot`). Multi-model (GPT / Claude / Gemini ids — see
+# `copilot /model` for your plan). Optional --effort when the model supports it.
+# LOOP_KIT_COPILOT_MODEL="gpt-5.4"
+# LOOP_KIT_COPILOT_EFFORT=""
+# LOOP_KIT_COPILOT_EFFORT_QUICK=""
+# LOOP_KIT_COPILOT_EFFORT_GNARLY="high"
+# LOOP_KIT_COPILOT_MAKER_TIMEOUT="900"
+
+# opencode — provider/model slugs (`opencode models`). Maker uses --agent build; reviewer/
+# council use --agent plan. Optional --variant for reasoning effort.
+# LOOP_KIT_OPENCODE_MODEL="nvidia/z-ai/glm-5.2"
+# LOOP_KIT_OPENCODE_VARIANT=""
+# LOOP_KIT_OPENCODE_VARIANT_QUICK=""
+# LOOP_KIT_OPENCODE_VARIANT_GNARLY="high"
+# LOOP_KIT_OPENCODE_MAKER_TIMEOUT="900"
+
 # A custom harness (anything you scaffolded with loop/new_harness.sh) reads whatever
 # LOOP_KIT_<NAME>_* vars its own loop/harnesses/<name>.sh adapter defines — see that file.
 
@@ -88,7 +106,8 @@ LOOP_KIT_HARNESSES="codex claude cursor"
 # need >=2 distinct members (there's no self-review adjacency concern for independent opinions
 # gathered in parallel with no cross-visibility), just diminishing value in asking the same
 # member twice. Each member's harness portion needs a loop/harnesses/<name>.sh adapter
-# implementing harness_council_run — codex, claude, cursor, and opencode all do out of the box.
+# implementing harness_council_run — codex, claude, cursor, copilot, and opencode all do out of
+# the box.
 LOOP_KIT_COUNCIL_HARNESSES="codex opencode claude"
 
 # Shared across every council member's adapter (not per-harness — a council run is meant to
@@ -100,7 +119,8 @@ LOOP_KIT_COUNCIL_HARNESSES="codex opencode claude"
 # LOOP_KIT_CODEX_COUNCIL_MODEL=""               # empty = let the codex CLI's own default decide
 # LOOP_KIT_CLAUDE_COUNCIL_MODEL="sonnet"
 # LOOP_KIT_CURSOR_COUNCIL_MODEL="grok-4.5-high" # falls back to LOOP_KIT_CURSOR_MODEL if unset
-# LOOP_KIT_OPENCODE_COUNCIL_MODEL="nvidia/z-ai/glm-5.2"
+# LOOP_KIT_COPILOT_COUNCIL_MODEL="gpt-5.4"      # falls back to LOOP_KIT_COPILOT_MODEL if unset
+# LOOP_KIT_OPENCODE_COUNCIL_MODEL="nvidia/z-ai/glm-5.2"  # falls back to LOOP_KIT_OPENCODE_MODEL
 
 # Skip specific members for a single run without editing this file (space-separated, matching
 # entries in LOOP_KIT_COUNCIL_HARNESSES exactly) — set as an env var when invoking council.sh,
@@ -118,7 +138,8 @@ LOOP_KIT_COUNCIL_HARNESSES="codex opencode claude"
 #   claude   — logged-in Claude Code CLI (`claude -p`)
 #   codex    — logged-in Codex CLI (`codex exec`)
 #   handoff  — Sleep writes prompts; loop/skillopt_handoff.sh answers via harness_council_run
-#              (claude / codex / cursor). Needs SkillOpt newer than PyPI 0.2.0 for handoff.
+#              (claude / codex / cursor / copilot / opencode). Needs SkillOpt newer than
+#              PyPI 0.2.0 for handoff.
 #
 # Engine defaults that aren't CLI flags (evolve_memory=false, gate_mode=on, …) live in
 # ~/.skillopt-sleep/config.json — start from loop/skillopt-sleep.config.json.example.

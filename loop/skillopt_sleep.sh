@@ -5,22 +5,31 @@
 # harvesting ~/.claude / ~/.codex chat transcripts, so the sleep cycle learns from
 # the same scored outcomes the ring already produced.
 #
+# Subscription-first backends (no Anthropic/OpenAI API key required):
+#   mock     — plumbing only
+#   claude   — logged-in Claude Code CLI (`claude -p`)
+#   codex    — logged-in Codex CLI (`codex exec`)
+#   handoff  — Sleep writes prompts; loop/skillopt_handoff.sh answers via
+#              harness_council_run (claude / codex / cursor). Needs SkillOpt
+#              newer than PyPI 0.2.0:
+#                pip install "git+https://github.com/microsoft/SkillOpt.git"
+#
 # Requires: python3, and `skillopt-sleep` on PATH (or `python -m skillopt_sleep`).
-# Install:  pip install skillopt   # or: uv tool install skillopt
 #
 # Usage:
 #   loop/skillopt_sleep.sh export [--reviewed] [export flags...]
 #   loop/skillopt_sleep.sh dry-run [--backend mock|claude|codex|handoff] [flags...]
-#   loop/skillopt_sleep.sh run     [--backend ...] [--i-reviewed] [flags...]
+#   loop/skillopt_sleep.sh run     [--backend ...] [--handoff-harness MEMBER] [--i-reviewed]
 #   loop/skillopt_sleep.sh status|adopt|schedule|unschedule [flags...]
 #
 # Config (loop/loop.config.sh):
-#   LOOP_KIT_SKILLOPT_SKILL_PATH   default .claude/skills/project-loop/SKILL.md
-#   LOOP_KIT_SKILLOPT_BACKEND      default mock
-#   LOOP_KIT_SKILLOPT_PREFERENCES  free-text house rules for reflection
-#   LOOP_KIT_SKILLOPT_EDIT_BUDGET  default 4
-#   LOOP_KIT_SKILLOPT_MAX_TASKS    default 40
-#   LOOP_KIT_SKILLOPT_TASKS_FILE   default loop/state/skillopt-tasks.json
+#   LOOP_KIT_SKILLOPT_SKILL_PATH      default .claude/skills/project-loop/SKILL.md
+#   LOOP_KIT_SKILLOPT_BACKEND         default mock
+#   LOOP_KIT_SKILLOPT_HANDOFF_HARNESS default first LOOP_KIT_HARNESSES member
+#   LOOP_KIT_SKILLOPT_PREFERENCES     free-text house rules for reflection
+#   LOOP_KIT_SKILLOPT_EDIT_BUDGET     default 4
+#   LOOP_KIT_SKILLOPT_MAX_TASKS       default 40
+#   LOOP_KIT_SKILLOPT_TASKS_FILE      default loop/state/skillopt-tasks.json
 #
 # Optional engine defaults: copy loop/skillopt-sleep.config.json.example to
 # ~/.skillopt-sleep/config.json (evolve_memory=false, gate on, no auto-adopt).
@@ -43,6 +52,7 @@ MAX_TASKS="${LOOP_KIT_SKILLOPT_MAX_TASKS:-}"
 [[ -z "$MAX_TASKS" ]] && MAX_TASKS=40
 TASKS_FILE="${LOOP_KIT_SKILLOPT_TASKS_FILE:-}"
 [[ -z "$TASKS_FILE" ]] && TASKS_FILE="$ROOT/loop/state/skillopt-tasks.json"
+HANDOFF_HARNESS="${LOOP_KIT_SKILLOPT_HANDOFF_HARNESS:-}"
 
 cmd="${1:-}"
 [[ -n "$cmd" ]] || die "usage: loop/skillopt_sleep.sh <export|dry-run|run|status|adopt|schedule|unschedule> [flags...]"
@@ -110,9 +120,9 @@ if [[ "$cmd" == "export" ]]; then
 fi
 
 # --- sleep engine commands ------------------------------------------------------
-SLEEP_BIN="$(find_sleep_cli)" || die "skillopt-sleep not found. Install with: pip install skillopt   (or: uv tool install skillopt)"
+SLEEP_BIN="$(find_sleep_cli)" || die "skillopt-sleep not found. Install with: pip install skillopt   (handoff: pip install 'git+https://github.com/microsoft/SkillOpt.git')"
 
-# Parse wrapper-owned flags; pass the rest through to skillopt-sleep.
+# Parse wrapper-owned flags; pass the rest through to skillopt-sleep / handoff driver.
 pass=()
 i_reviewed=0
 use_tasks_file=1
@@ -129,6 +139,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --backend) backend="$2"; shift 2 ;;
     --target-skill-path) SKILL_PATH="$2"; shift 2 ;;
+    --handoff-harness) HANDOFF_HARNESS="$2"; shift 2 ;;
     --export-first)
       # default for dry-run/run; accepted as explicit no-op for clarity
       shift
@@ -182,20 +193,33 @@ PY
       fi
     fi
 
-    args=("$cmd" --project "$ROOT" --backend "$backend" --target-skill-path "$SKILL_PATH")
+    # Common Sleep args (also passed into the handoff driver, which re-invokes Sleep).
+    sleep_pass=(--project "$ROOT" --target-skill-path "$SKILL_PATH")
     if [[ "$EDIT_BUDGET" =~ ^[0-9]+$ ]] && (( EDIT_BUDGET > 0 )); then
-      args+=(--edit-budget "$EDIT_BUDGET")
+      sleep_pass+=(--edit-budget "$EDIT_BUDGET")
     fi
     if [[ "$MAX_TASKS" =~ ^[0-9]+$ ]] && (( MAX_TASKS > 0 )); then
-      args+=(--max-tasks "$MAX_TASKS")
+      sleep_pass+=(--max-tasks "$MAX_TASKS")
     fi
     if [[ -n "$PREFERENCES" ]]; then
-      args+=(--preferences "$PREFERENCES")
+      sleep_pass+=(--preferences "$PREFERENCES")
     fi
     if (( use_tasks_file )); then
-      args+=(--tasks-file "$TASKS_FILE")
+      sleep_pass+=(--tasks-file "$TASKS_FILE")
     fi
-    args+=("${pass[@]}")
+    sleep_pass+=("${pass[@]}")
+
+    if [[ "$backend" == "handoff" ]]; then
+      handoff_args=("$cmd")
+      if [[ -n "$HANDOFF_HARNESS" ]]; then
+        handoff_args+=(--handoff-harness "$HANDOFF_HARNESS")
+      fi
+      handoff_args+=("${sleep_pass[@]}")
+      log "dispatching handoff driver (subscription harness answers Sleep prompts)"
+      exec bash "$ROOT/loop/skillopt_handoff.sh" "${handoff_args[@]}"
+    fi
+
+    args=("$cmd" --backend "$backend" "${sleep_pass[@]}")
     log "running: $SLEEP_BIN ${args[*]}"
     # shellcheck disable=SC2086
     exec $SLEEP_BIN "${args[@]}"

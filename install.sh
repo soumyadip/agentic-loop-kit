@@ -44,30 +44,109 @@ Modes:
   --force                    fresh install that also overwrites loop/loop.config.sh
                              (mutually exclusive with --update)
 
-Fresh-install options (ignored by --update except --sensitive-desc / --non-interactive):
-  --build-cmd "CMD"          command verify.sh runs to build          (default: make build)
-  --test-cmd "CMD"           command verify.sh runs to test           (default: make test)
-  --sensitive-pattern REGEX  extended-regex of always-blocked paths   (default: ^(deploy/|secrets|\.github/workflows/))
-  --sensitive-desc "TEXT"    human description of the above, used in prompt text
+Interactive installs print a short "why / loop impact" blurb before each question.
+Use --non-interactive plus flags to skip prompts.
+
+── Core loop options ──────────────────────────────────────────────────────────
+
+  --build-cmd "CMD"          verify.sh build step after every maker attempt
+                              (default: make build)
+                              Why: without a real build, broken compiles still reach review.
+                              Loop impact: failure → retry maker with the log; pass → review.
+
+  --test-cmd "CMD"           verify.sh test step after build
+                              (default: make test)
+                              Why: acceptance criteria must be checkable, not prose-only.
+                              Loop impact: same as build — gates eligibility for review/merge.
+
+  --sensitive-pattern REGEX  paths that always block for a human (never auto-merge)
+                              (default: ^(deploy/|secrets|\.github/workflows/))
+                              Why: governance/secrets must not self-approve via two models.
+                              Loop impact: matching diffs → queue/blocked/ even if verify+review OK.
+
+  --sensitive-desc "TEXT"    human label for those paths, baked into review prompts
                               (default: "deploy configs, secrets, CI workflows")
-  --principles-doc PATH      working-principles doc the templates point at (default: AGENTS.md)
-  --roadmap-doc PATH         milestone doc new_task.sh validates against; pass "" to disable
-                              milestone validation entirely                (default: docs/roadmap.md)
-  --harnesses "a b:m c"      space-separated maker/checker rotation, order = review cycle, need
-                              >=2 entries (not necessarily >=2 distinct harnesses — an entry can
-                              be "harness:model" to pin one model on a multi-model harness like
-                              cursor or opencode, so e.g. "cursor:grok-4.5-high
-                              cursor:claude-4.5-sonnet" is a valid 2-entry rotation using only
-                              one CLI)                               (default: $BUILTIN_HARNESSES)
-  --codex-model NAME         default model for bare "codex" entries  (default: gpt-5.6-terra)
-  --claude-model NAME        default model for bare "claude" entries (default: sonnet)
-  --cursor-model NAME        default model for bare "cursor" entries (default: grok-4.5-high)
-  --council-harnesses "a b"  space-separated members council.sh asks independently — same
-                              "harness"/"harness:model" syntax as --harnesses, but no >=2 or
-                              distinctness requirement (no self-review adjacency to protect)
-                                                                (default: codex opencode claude)
+                              Why: reviewers need plain language, not only a regex.
+                              Loop impact: appears in review templates; not stored in loop.config.sh.
+
+  --principles-doc PATH      working-principles doc makers/reviewers must read
+                              (default: AGENTS.md)
+                              Why: TDD/architecture rules need one authoritative place.
+                              Loop impact: task + review prompts point here every turn.
+
+  --roadmap-doc PATH         milestone doc for new_task.sh validation; "" or none = off
+                              (default: docs/roadmap.md)
+                              Why: keeps queue tasks tied to real roadmap ids.
+                              Loop impact: new_task.sh rejects unknown milestone: values.
+
+  --harnesses "a b:m c"      maker/checker ring (order = who reviews whom); need >=2
+                              (default: $BUILTIN_HARNESSES)
+                              Why: no model grades its own homework.
+                              Loop impact: maker frontmatter + reviewer_for() ring; each seat
+                              needs loop/harnesses/<name>.sh.
+
+  --codex-model / --claude-model / --cursor-model
+                             default model for bare (unpinned) seats of that harness
+                              Why: multi-model harnesses need a project default when you
+                              don't write harness:model in LOOP_KIT_HARNESSES.
+                              Loop impact: used for maker-default and checker unless overridden.
+
+  --council-harnesses "a b"  independent design opinions (no ring / no >=2 rule)
+                              (default: codex opencode claude)
+                              Why: scope/ADR questions benefit from parallel disagreement.
+                              Loop impact: only council.sh; not used by run.sh.
+
+── SkillOpt-Sleep options ─────────────────────────────────────────────────────
+
+  --with-skillopt            install the skillopt package (pip) during this run
+  --no-skillopt              skip package install (default when --non-interactive)
+  --skillopt-source pip|git  pip = PyPI skillopt; git = GitHub main (needed for handoff)
+                              (default when installing: pip)
+  --skillopt-backend NAME    mock|claude|codex|handoff  (default: mock)
+                              Why: real refinement uses logged-in CLIs, not API keys.
+                              Loop impact: loop/skillopt_sleep.sh default --backend.
+  --skillopt-trigger MODE    off|remind|dry-run|run  (default: remind)
+                              Why: surface skill refinement without forcing spend.
+                              Loop impact: run.sh skillopt_trigger.sh after done thresholds.
+  --skillopt-trigger-every N done/ tasks since last trigger before firing (default: 10; 0=off)
+  --skillopt-trigger-backend mock|claude|codex|handoff  (default: mock)
+                              Why: auto dry-run/run needs a backend; mock is safest.
+  --skillopt-handoff-harness MEMBER
+                              harness that answers handoff prompts (e.g. cursor, opencode)
+                              Why: Cursor/opencode are not native Sleep backends.
+                              Loop impact: --backend handoff → skillopt_handoff.sh.
+  --skillopt-engine-config   copy loop/skillopt-sleep.config.json.example →
+                              ~/.skillopt-sleep/config.json if missing
+  --no-skillopt-engine-config  skip that copy
+
   --non-interactive          never prompt; use flags/defaults only
 EOF
+}
+
+# Print a short explanation, then prompt. $1 = multi-line why/impact; $2 = prompt label;
+# $3 = default. Sets REPLY.
+ask() {
+  local blurb="$1" label="$2" default="$3" ans
+  printf '\n' >&2
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && echo "[install] $line" >&2
+  done <<< "$blurb"
+  read -rp "[install] $label [$default]: " ans
+  REPLY="${ans:-$default}"
+}
+
+ask_yn() {
+  local blurb="$1" label="$2" default="$3" ans
+  printf '\n' >&2
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && echo "[install] $line" >&2
+  done <<< "$blurb"
+  read -rp "[install] $label [$default]: " ans
+  ans="${ans:-$default}"
+  case "$ans" in
+    y|Y|yes|YES|true|1) REPLY=1 ;;
+    *) REPLY=0 ;;
+  esac
 }
 
 # Copy kit-managed files into $1. When $2 is "update", skip overwriting review_mandate and
@@ -168,11 +247,13 @@ blocks = [
             "# Added by install.sh --update (SkillOpt-Sleep). See loop.config.sh.example.",
             'LOOP_KIT_SKILLOPT_SKILL_PATH=".claude/skills/project-loop/SKILL.md"',
             'LOOP_KIT_SKILLOPT_BACKEND="mock"',
+            'LOOP_KIT_SKILLOPT_HANDOFF_HARNESS=""',
             'LOOP_KIT_SKILLOPT_MAX_TASKS="40"',
             'LOOP_KIT_SKILLOPT_EDIT_BUDGET="4"',
             'LOOP_KIT_SKILLOPT_TRIGGER="remind"',
             'LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE="10"',
             'LOOP_KIT_SKILLOPT_TRIGGER_ON_RUN_END="1"',
+            'LOOP_KIT_SKILLOPT_TRIGGER_BACKEND="mock"',
         ],
     ),
     (
@@ -183,6 +264,23 @@ blocks = [
             'LOOP_KIT_SKILLOPT_TRIGGER="remind"',
             'LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE="10"',
             'LOOP_KIT_SKILLOPT_TRIGGER_ON_RUN_END="1"',
+            'LOOP_KIT_SKILLOPT_TRIGGER_BACKEND="mock"',
+        ],
+    ),
+    (
+        "LOOP_KIT_SKILLOPT_TRIGGER_BACKEND",
+        [
+            "",
+            "# Added by install.sh --update (SkillOpt trigger backend). See loop.config.sh.example.",
+            'LOOP_KIT_SKILLOPT_TRIGGER_BACKEND="mock"',
+        ],
+    ),
+    (
+        "LOOP_KIT_SKILLOPT_HANDOFF_HARNESS",
+        [
+            "",
+            "# Added by install.sh --update (SkillOpt handoff harness). See loop.config.sh.example.",
+            'LOOP_KIT_SKILLOPT_HANDOFF_HARNESS=""',
         ],
     ),
 ]
@@ -221,6 +319,201 @@ warn_missing_adapters() {
   fi
 }
 
+# Upsert KEY="VALUE" lines in loop.config.sh (replace existing assignment or append).
+upsert_config_keys() {
+  local config="$1"
+  shift
+  python3 - "$config" "$@" <<'PY'
+import re, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+pairs = sys.argv[2:]
+text = path.read_text(encoding="utf-8") if path.is_file() else ""
+for item in pairs:
+    if "=" not in item:
+        continue
+    key, val = item.split("=", 1)
+    line = f'{key}="{val}"'
+    pat = re.compile(rf"(?m)^\s*{re.escape(key)}=.*$")
+    if pat.search(text):
+        text = pat.sub(line, text)
+    else:
+        text = text.rstrip() + f"\n\n# Set by install.sh SkillOpt configure\n{line}\n"
+path.write_text(text, encoding="utf-8")
+print(f"updated {path.name}: " + ", ".join(p.split("=", 1)[0] for p in pairs if "=" in p))
+PY
+}
+
+install_skillopt_package() {
+  local source="$1"
+  local cmd
+  case "$source" in
+    git)
+      cmd=(python3 -m pip install --user "git+https://github.com/microsoft/SkillOpt.git")
+      log "installing SkillOpt from GitHub main (handoff-capable)…"
+      ;;
+    pip|*)
+      cmd=(python3 -m pip install --user skillopt)
+      log "installing SkillOpt from PyPI…"
+      ;;
+  esac
+  if "${cmd[@]}"; then
+    log "skillopt package installed"
+    if command -v skillopt-sleep >/dev/null 2>&1 || python3 -c "import skillopt_sleep" >/dev/null 2>&1; then
+      log "skillopt-sleep is available"
+    else
+      log "note: ensure your user pip bin dir is on PATH (skillopt-sleep may live under ~/.local/bin)"
+    fi
+  else
+    log "WARNING: skillopt pip install failed — install manually later (see loop/README.md SkillOpt-Sleep)"
+    return 1
+  fi
+}
+
+ensure_skillopt_engine_config() {
+  local target="$1"
+  local dest="$HOME/.skillopt-sleep/config.json"
+  local src="$target/loop/skillopt-sleep.config.json.example"
+  [[ -f "$src" ]] || src="$KIT_ROOT/loop/skillopt-sleep.config.json.example"
+  mkdir -p "$HOME/.skillopt-sleep"
+  if [[ -f "$dest" ]]; then
+    log "keeping existing $dest"
+    return 0
+  fi
+  cp "$src" "$dest"
+  log "wrote $dest (evolve_memory=false, gate on, auto_adopt off)"
+}
+
+# Interactive or flag-driven SkillOpt questions. Sets globals:
+# skillopt_do_install, skillopt_source, skillopt_backend, skillopt_trigger,
+# skillopt_trigger_every, skillopt_trigger_backend, skillopt_handoff_harness,
+# skillopt_engine_config
+prompt_skillopt_settings() {
+  if [[ "$non_interactive" == 1 ]]; then
+    return 0
+  fi
+  [[ -t 0 ]] || return 0
+
+  ask_yn \
+"SkillOpt-Sleep refines .claude/skills/project-loop/SKILL.md from loop/log evidence
+(held-out gate; human adopt). Uses subscription CLIs (claude/codex) or handoff
+(cursor/opencode) — no API keys required for those paths.
+Why now: without the package, skillopt_sleep.sh cannot run.
+Loop impact: optional; run.sh only reminds/auto-stages if TRIGGER is set." \
+    "Install SkillOpt Python package now? (y/n)" \
+    "$([[ "$skillopt_do_install" == 1 ]] && echo y || echo n)"
+  skillopt_do_install="$REPLY"
+
+  if (( skillopt_do_install )); then
+    ask \
+"pip = PyPI (fine for mock/claude/codex). git = GitHub main (needed for --backend handoff).
+Why: handoff landed after PyPI 0.2.0.
+Loop impact: only affects which skillopt_sleep features work." \
+      "SkillOpt install source (pip|git)" "$skillopt_source"
+    skillopt_source="$REPLY"
+  fi
+
+  ask \
+"Default backend for loop/skillopt_sleep.sh:
+  mock    — plumbing only
+  claude  — Claude Code login/subscription
+  codex   — Codex login/subscription
+  handoff — kit harness answers Sleep prompts (cursor/opencode/…)
+Why: real refinement should use logged-in CLIs, not API keys.
+Loop impact: default --backend for manual + auto dry-run/run (via TRIGGER_BACKEND)." \
+    "SkillOpt backend (mock|claude|codex|handoff)" "$skillopt_backend"
+  skillopt_backend="$REPLY"
+
+  ask \
+"When run.sh finishes (or after each done/, per TRIGGER_ON_RUN_END):
+  off     — never nudge
+  remind  — print how to run SkillOpt (default; no model calls)
+  dry-run — auto export + dry-run (never adopts)
+  run     — auto export + stage proposal (never auto-adopts)
+Why: otherwise SkillOpt is easy to forget; remind keeps it visible.
+Loop impact: loop/skillopt_trigger.sh watermark in loop/state/skillopt-trigger.json." \
+    "SkillOpt activity trigger (off|remind|dry-run|run)" "$skillopt_trigger"
+  skillopt_trigger="$REPLY"
+
+  ask \
+"Fire after this many tasks enter done/ since the last successful trigger (0 = never).
+Why: absolute queue size is wrong; relative watermark matches real usage.
+Loop impact: ONLY when TRIGGER is remind|dry-run|run." \
+    "SkillOpt trigger every N done" "$skillopt_trigger_every"
+  skillopt_trigger_every="$REPLY"
+
+  ask \
+"Backend used when TRIGGER is dry-run|run (mock|claude|codex|handoff).
+Why: auto paths should default to mock until you opt into subscription spend.
+Loop impact: ignored for remind/off." \
+    "SkillOpt trigger backend" "$skillopt_trigger_backend"
+  skillopt_trigger_backend="$REPLY"
+
+  ask \
+"Member that answers --backend handoff prompts (empty = first LOOP_KIT_HARNESSES seat).
+Examples: cursor, cursor:grok-4.5-high, opencode, claude.
+Why: Cursor/opencode are not native SkillOpt backends — handoff uses harness_council_run.
+Loop impact: only when backend or trigger-backend is handoff." \
+    "SkillOpt handoff harness" "$skillopt_handoff_harness"
+  skillopt_handoff_harness="$REPLY"
+
+  ask_yn \
+"Copy loop/skillopt-sleep.config.json.example to ~/.skillopt-sleep/config.json if missing
+(engine defaults: evolve_memory=false, gate on, auto_adopt off).
+Why: Sleep engine reads ~/.skillopt-sleep/; without it you get built-in defaults.
+Loop impact: does not change loop.config.sh." \
+    "Write ~/.skillopt-sleep/config.json if missing? (y/n)" \
+    "$([[ "$skillopt_engine_config" == 1 ]] && echo y || echo n)"
+  skillopt_engine_config="$REPLY"
+}
+
+# Re-validate after interactive answers (flags already validated above).
+validate_skillopt_choices() {
+  case "$skillopt_source" in
+    pip|git) ;;
+    *) die "SkillOpt source must be pip or git (got: $skillopt_source)" ;;
+  esac
+  case "$skillopt_backend" in
+    mock|claude|codex|handoff) ;;
+    *) die "SkillOpt backend must be mock|claude|codex|handoff (got: $skillopt_backend)" ;;
+  esac
+  case "$skillopt_trigger" in
+    off|remind|dry-run|run) ;;
+    *) die "SkillOpt trigger must be off|remind|dry-run|run (got: $skillopt_trigger)" ;;
+  esac
+  case "$skillopt_trigger_backend" in
+    mock|claude|codex|handoff) ;;
+    *) die "SkillOpt trigger backend must be mock|claude|codex|handoff (got: $skillopt_trigger_backend)" ;;
+  esac
+  [[ "$skillopt_trigger_every" =~ ^[0-9]+$ ]] || die "SkillOpt trigger every must be an integer"
+  if [[ "$skillopt_backend" == "handoff" || "$skillopt_trigger_backend" == "handoff" ]]; then
+    if [[ "$skillopt_source" == "pip" && "$skillopt_do_install" == 1 ]]; then
+      log "note: handoff needs SkillOpt from git (PyPI 0.2.0 lacks it) — prefer --skillopt-source git"
+    fi
+  fi
+}
+
+apply_skillopt_choices() {
+  local target="$1" config="$2"
+  validate_skillopt_choices
+  if (( skillopt_do_install )); then
+    install_skillopt_package "$skillopt_source" || true
+  fi
+  if (( skillopt_engine_config )); then
+    ensure_skillopt_engine_config "$target"
+  fi
+  upsert_config_keys "$config" \
+    "LOOP_KIT_SKILLOPT_SKILL_PATH=.claude/skills/project-loop/SKILL.md" \
+    "LOOP_KIT_SKILLOPT_BACKEND=${skillopt_backend}" \
+    "LOOP_KIT_SKILLOPT_HANDOFF_HARNESS=${skillopt_handoff_harness}" \
+    "LOOP_KIT_SKILLOPT_MAX_TASKS=40" \
+    "LOOP_KIT_SKILLOPT_EDIT_BUDGET=4" \
+    "LOOP_KIT_SKILLOPT_TRIGGER=${skillopt_trigger}" \
+    "LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE=${skillopt_trigger_every}" \
+    "LOOP_KIT_SKILLOPT_TRIGGER_ON_RUN_END=1" \
+    "LOOP_KIT_SKILLOPT_TRIGGER_BACKEND=${skillopt_trigger_backend}"
+}
+
 # --- argv -----------------------------------------------------------------------
 [[ $# -ge 1 ]] || { usage; exit 1; }
 target="$1"; shift
@@ -241,6 +534,17 @@ non_interactive=0
 force=0
 mode="install"   # install | update
 
+# SkillOpt defaults (safe / remind-only until the user opts in)
+skillopt_do_install=0          # 0 unless --with-skillopt or interactive yes
+skillopt_source="pip"          # pip | git
+skillopt_backend="mock"
+skillopt_trigger="remind"
+skillopt_trigger_every="10"
+skillopt_trigger_backend="mock"
+skillopt_handoff_harness=""
+skillopt_engine_config=0       # 0 unless interactive yes or --skillopt-engine-config
+skillopt_flag_set=0            # 1 if any --with/--no-skillopt flag was passed
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --build-cmd) build_cmd="$2"; shift 2 ;;
@@ -254,6 +558,16 @@ while [[ $# -gt 0 ]]; do
     --claude-model) claude_model="$2"; shift 2 ;;
     --cursor-model) cursor_model="$2"; shift 2 ;;
     --council-harnesses) council_harnesses="$2"; shift 2 ;;
+    --with-skillopt) skillopt_do_install=1; skillopt_flag_set=1; shift ;;
+    --no-skillopt) skillopt_do_install=0; skillopt_flag_set=1; shift ;;
+    --skillopt-source) skillopt_source="$2"; skillopt_flag_set=1; shift 2 ;;
+    --skillopt-backend) skillopt_backend="$2"; skillopt_flag_set=1; shift 2 ;;
+    --skillopt-trigger) skillopt_trigger="$2"; skillopt_flag_set=1; shift 2 ;;
+    --skillopt-trigger-every) skillopt_trigger_every="$2"; skillopt_flag_set=1; shift 2 ;;
+    --skillopt-trigger-backend) skillopt_trigger_backend="$2"; skillopt_flag_set=1; shift 2 ;;
+    --skillopt-handoff-harness) skillopt_handoff_harness="$2"; skillopt_flag_set=1; shift 2 ;;
+    --skillopt-engine-config) skillopt_engine_config=1; skillopt_flag_set=1; shift ;;
+    --no-skillopt-engine-config) skillopt_engine_config=0; skillopt_flag_set=1; shift ;;
     --non-interactive) non_interactive=1; shift ;;
     --force) force=1; shift ;;
     --update|--upgrade) mode="update"; shift ;;
@@ -261,6 +575,24 @@ while [[ $# -gt 0 ]]; do
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
+
+case "$skillopt_source" in
+  pip|git) ;;
+  *) die "--skillopt-source must be pip or git (got: $skillopt_source)" ;;
+esac
+case "$skillopt_backend" in
+  mock|claude|codex|handoff) ;;
+  *) die "--skillopt-backend must be mock|claude|codex|handoff (got: $skillopt_backend)" ;;
+esac
+case "$skillopt_trigger" in
+  off|remind|dry-run|run) ;;
+  *) die "--skillopt-trigger must be off|remind|dry-run|run (got: $skillopt_trigger)" ;;
+esac
+case "$skillopt_trigger_backend" in
+  mock|claude|codex|handoff) ;;
+  *) die "--skillopt-trigger-backend must be mock|claude|codex|handoff (got: $skillopt_trigger_backend)" ;;
+esac
+[[ "$skillopt_trigger_every" =~ ^[0-9]+$ ]] || die "--skillopt-trigger-every must be an integer"
 
 [[ -d "$target" ]] || die "target directory does not exist: $target"
 target="$(cd "$target" && pwd)"
@@ -286,41 +618,107 @@ if [[ "$mode" == "update" ]]; then
   fi
   harnesses="${LOOP_KIT_HARNESSES:-$harnesses}"
   council_harnesses="${LOOP_KIT_COUNCIL_HARNESSES:-$council_harnesses}"
+  # Prefer existing SkillOpt settings as interactive defaults when the user
+  # did not pass any --skillopt* / --with-skillopt flags (those win).
+  if (( ! skillopt_flag_set )); then
+    skillopt_backend="${LOOP_KIT_SKILLOPT_BACKEND:-$skillopt_backend}"
+    skillopt_trigger="${LOOP_KIT_SKILLOPT_TRIGGER:-$skillopt_trigger}"
+    skillopt_trigger_every="${LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE:-$skillopt_trigger_every}"
+    skillopt_trigger_backend="${LOOP_KIT_SKILLOPT_TRIGGER_BACKEND:-$skillopt_trigger_backend}"
+    skillopt_handoff_harness="${LOOP_KIT_SKILLOPT_HANDOFF_HARNESS:-$skillopt_handoff_harness}"
+  fi
 
-  # Prefer an explicit --sensitive-desc; otherwise keep the install default (not stored in config).
   if [[ "$non_interactive" != 1 && -t 0 ]]; then
-    read -rp "Sensitive-path description for prompt text [$sensitive_desc]: " ans
-    sensitive_desc="${ans:-$sensitive_desc}"
+    ask \
+"Human label for governance-sensitive paths, baked into review prompt text (not stored in loop.config.sh).
+Why: reviewers see prose, not only LOOP_KIT_SENSITIVE_PATTERN.
+Loop impact: substituted into {{SENSITIVE_DESC}} in review templates on this update." \
+      "Sensitive-path description for prompt text" "$sensitive_desc"
+    sensitive_desc="$REPLY"
+
+    prompt_skillopt_settings
   fi
 
   log "updating kit files in $target (preserving loop/loop.config.sh)"
   copy_kit_files "$target" "update"
   append_msg="$(append_missing_config_keys "$target/loop/loop.config.sh")"
   log "$append_msg"
+  # Interactive update always ran prompt_skillopt_settings; non-interactive only if
+  # any --skillopt* / --with-skillopt flag was passed.
+  if [[ "$non_interactive" != 1 && -t 0 ]] || (( skillopt_flag_set )); then
+    apply_skillopt_choices "$target" "$target/loop/loop.config.sh"
+  fi
   substitute_placeholders "$target" "$sensitive_desc" "$principles_doc" "$roadmap_doc"
   warn_missing_adapters "$target" $harnesses $council_harnesses
 
   log "done. Updated scripts, templates, built-in harnesses, docs, and thin skills."
-  log "  kept: loop/loop.config.sh"
+  log "  kept: loop/loop.config.sh (SkillOpt keys upserted if you configured SkillOpt)"
   log "  kept if present: loop/review_mandate.partial.md, .claude/skills/project-loop/SKILL.md"
   log "  queue/log/state untouched; custom loop/harnesses/<name>.sh (non-built-in) untouched"
-  log "  review loop/loop.config.sh.example for any new knobs; --update only appends known missing keys"
+  log "  review loop/loop.config.sh.example for any new knobs; --update appends known missing keys"
   exit 0
 fi
 
 # --- fresh install path ---------------------------------------------------------
 if [[ "$non_interactive" != 1 && -t 0 ]]; then
-  read -rp "Build command [$build_cmd]: " ans; build_cmd="${ans:-$build_cmd}"
-  read -rp "Test command [$test_cmd]: " ans; test_cmd="${ans:-$test_cmd}"
-  read -rp "Sensitive-path regex [$sensitive_pattern]: " ans; sensitive_pattern="${ans:-$sensitive_pattern}"
-  read -rp "Sensitive-path description [$sensitive_desc]: " ans; sensitive_desc="${ans:-$sensitive_desc}"
-  read -rp "Working-principles doc [$principles_doc]: " ans; principles_doc="${ans:-$principles_doc}"
-  read -rp "Roadmap/milestone doc, or 'none' to disable milestone gating [$roadmap_doc]: " ans
-  if [[ -n "$ans" ]]; then
-    [[ "$ans" == "none" ]] && roadmap_doc="" || roadmap_doc="$ans"
+  log "Each question below includes why it matters and how it affects normal loop runs."
+  log "Press Enter to accept the default in [brackets]. Full flag docs: install.sh --help"
+
+  ask \
+"Command loop/verify.sh runs after every maker attempt (build/compile/typecheck).
+Why: without a real gate, broken work still reaches the checker and can merge.
+Loop impact: fail → retry maker with the log; pass → sensitive-path check then review." \
+    "Build command" "$build_cmd"
+  build_cmd="$REPLY"
+
+  ask \
+"Command loop/verify.sh runs after build (tests).
+Why: acceptance criteria must be executable, not prose-only.
+Loop impact: same as build — blocks review until green." \
+    "Test command" "$test_cmd"
+  test_cmd="$REPLY"
+
+  ask \
+"Extended regex of path prefixes that always go to queue/blocked/ for a human.
+Why: deploy/secrets/CI (and your ADRs/schemas) must not auto-merge via two models agreeing.
+Loop impact: matching diffs skip auto-review merge regardless of VERDICT." \
+    "Sensitive-path regex" "$sensitive_pattern"
+  sensitive_pattern="$REPLY"
+
+  ask \
+"Plain-language label for those sensitive paths, baked into review prompts.
+Why: reviewers need prose; the regex alone is easy to miss.
+Loop impact: {{SENSITIVE_DESC}} in review templates (not written to loop.config.sh)." \
+    "Sensitive-path description" "$sensitive_desc"
+  sensitive_desc="$REPLY"
+
+  ask \
+"Doc makers and reviewers must read first (TDD, architecture, conventions).
+Why: fresh-context agents need one authoritative principles file.
+Loop impact: every task_prompt / review_prompt points here (LOOP_KIT_PRINCIPLES_DOC)." \
+    "Working-principles doc" "$principles_doc"
+  principles_doc="$REPLY"
+
+  ask \
+"Roadmap file whose '## <id> — …' headings validate new_task.sh milestone: fields.
+Type 'none' to disable milestone gating.
+Why: keeps the queue tied to real roadmap work instead of free-floating tasks.
+Loop impact: new_task.sh rejects unknown milestones when this file exists." \
+    "Roadmap/milestone doc (or none)" "$roadmap_doc"
+  if [[ "$REPLY" == "none" ]]; then
+    roadmap_doc=""
+  else
+    roadmap_doc="$REPLY"
   fi
-  read -rp "Harnesses/models for the maker/checker rotation (space-separated 'harness' or 'harness:model' entries, order = review cycle, need >=2) [$harnesses]: " ans
-  harnesses="${ans:-$harnesses}"
+
+  ask \
+"Maker/checker seats in review-ring order (space-separated). Need >=2.
+Use harness or harness:model (e.g. cursor:grok-4.5-high cursor:claude-4.5-sonnet).
+Why: no model grades its own homework — each seat is reviewed by the next.
+Loop impact: run.sh maker routing + reviewer_for(); each harness needs an adapter." \
+    "Harnesses (maker/checker ring)" "$harnesses"
+  harnesses="$REPLY"
+
   # Only prompt once per bare (no ':model') harness name — an entry that already pins its own
   # model doesn't need (or use) this project-wide default.
   prompted=""
@@ -329,14 +727,47 @@ if [[ "$non_interactive" != 1 && -t 0 ]]; then
     case " $prompted " in *" $h "*) continue ;; esac
     prompted="$prompted $h"
     case "$h" in
-      codex)  read -rp "  Default model for bare 'codex' entries [$codex_model]: " ans; codex_model="${ans:-$codex_model}" ;;
-      claude) read -rp "  Default model for bare 'claude' entries [$claude_model]: " ans; claude_model="${ans:-$claude_model}" ;;
-      cursor) read -rp "  Default model for bare 'cursor' entries [$cursor_model]: " ans; cursor_model="${ans:-$cursor_model}" ;;
-      *) log "  '$h' has no built-in adapter — you'll need to run 'loop/new_harness.sh $h' in the target repo after install." ;;
+      codex)
+        ask \
+"Default model for bare 'codex' seats (maker default + checker unless you split in config).
+Why: bare 'codex' entries need a project default.
+Loop impact: LOOP_KIT_CODEX_MAKER_MODEL_DEFAULT / CHECKER_MODEL." \
+          "  Default model for bare 'codex' entries" "$codex_model"
+        codex_model="$REPLY"
+        ;;
+      claude)
+        ask \
+"Default model for bare 'claude' seats (maker default + checker unless you split in config).
+Why: bare 'claude' entries need a project default.
+Loop impact: LOOP_KIT_CLAUDE_MAKER_MODEL_* / CHECKER_MODEL." \
+          "  Default model for bare 'claude' entries" "$claude_model"
+        claude_model="$REPLY"
+        ;;
+      cursor)
+        ask \
+"Default model for bare 'cursor' seats (cursor-agent slug, often includes effort).
+Why: bare 'cursor' entries need a project default.
+Loop impact: LOOP_KIT_CURSOR_MODEL for maker and checker." \
+          "  Default model for bare 'cursor' entries" "$cursor_model"
+        cursor_model="$REPLY"
+        ;;
+      *) log "  '$h' has no built-in adapter — run 'loop/new_harness.sh $h' in the target repo after install." ;;
     esac
   done
-  read -rp "Council members for design/scope questions (space-separated, same syntax, no >=2 requirement) [$council_harnesses]: " ans
-  council_harnesses="${ans:-$council_harnesses}"
+
+  ask \
+"Who council.sh asks for independent design/scope opinions (no ring, no >=2 rule).
+Why: ADRs benefit from parallel disagreement without merge pressure.
+Loop impact: only council.sh — not used by the maker/checker loop." \
+    "Council members" "$council_harnesses"
+  council_harnesses="$REPLY"
+
+  # Interactive default: offer SkillOpt install (y) so new installs discover it.
+  if (( ! skillopt_flag_set )); then
+    skillopt_do_install=1
+    skillopt_engine_config=1
+  fi
+  prompt_skillopt_settings
 fi
 
 harness_count=0
@@ -397,13 +828,21 @@ copy_kit_files "$target" "install"
   echo "# SkillOpt-Sleep: refine .claude/skills/project-loop/SKILL.md from loop/log evidence."
   echo "# See loop/README.md \"SkillOpt-Sleep\" and loop/skillopt-sleep.config.json.example."
   echo "LOOP_KIT_SKILLOPT_SKILL_PATH=\".claude/skills/project-loop/SKILL.md\""
-  echo "LOOP_KIT_SKILLOPT_BACKEND=\"mock\""
+  echo "LOOP_KIT_SKILLOPT_BACKEND=\"${skillopt_backend}\""
+  echo "LOOP_KIT_SKILLOPT_HANDOFF_HARNESS=\"${skillopt_handoff_harness}\""
   echo "LOOP_KIT_SKILLOPT_MAX_TASKS=\"40\""
   echo "LOOP_KIT_SKILLOPT_EDIT_BUDGET=\"4\""
-  echo "LOOP_KIT_SKILLOPT_TRIGGER=\"remind\""
-  echo "LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE=\"10\""
+  echo "LOOP_KIT_SKILLOPT_TRIGGER=\"${skillopt_trigger}\""
+  echo "LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE=\"${skillopt_trigger_every}\""
   echo "LOOP_KIT_SKILLOPT_TRIGGER_ON_RUN_END=\"1\""
+  echo "LOOP_KIT_SKILLOPT_TRIGGER_BACKEND=\"${skillopt_trigger_backend}\""
 } > "$target/loop/loop.config.sh"
+
+# Package install + ~/.skillopt-sleep (config keys already written above; upsert is idempotent).
+if (( skillopt_do_install || skillopt_engine_config || skillopt_flag_set )) \
+   || [[ "$non_interactive" != 1 && -t 0 ]]; then
+  apply_skillopt_choices "$target" "$target/loop/loop.config.sh"
+fi
 
 substitute_placeholders "$target" "$sensitive_desc" "$principles_doc" "$roadmap_doc"
 warn_missing_adapters "$target" $harnesses $council_harnesses
@@ -424,9 +863,8 @@ log "  5. Install prerequisite CLIs for your chosen harnesses ($harnesses), and 
 log "     opencode (for council.sh)."
 log "  6. Seed loop/queue/pending/ (loop/new_task.sh <slug> <milestone>), then:"
 log "       cd $target && LOOP_MAX_ITERATIONS=1 loop/run.sh   # first supervised run"
-log "  7. Optional — SkillOpt-Sleep for project skill refinement:"
-log "       pip install skillopt"
-log "       cp $target/loop/skillopt-sleep.config.json.example ~/.skillopt-sleep/config.json"
-log "       loop/skillopt_sleep.sh dry-run --backend mock   # after a few done/blocked tasks"
-log "  8. Later, pull kit updates with:"
+log "  7. SkillOpt-Sleep (configured above; TRIGGER=${skillopt_trigger}, BACKEND=${skillopt_backend}):"
+log "       loop/skillopt_sleep.sh dry-run --backend ${skillopt_backend}"
+log "       # after a few done/blocked tasks; human adopt only — never auto-merge skill edits"
+log "  8. Later, pull kit updates (and re-prompt SkillOpt) with:"
 log "       $KIT_ROOT/install.sh $target --update"

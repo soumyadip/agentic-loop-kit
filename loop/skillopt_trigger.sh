@@ -124,9 +124,10 @@ remind_message() {
   local since="$1" done_count="$2"
   cat <<EOF
 [skillopt_trigger] $since task(s) merged to done since last SkillOpt trigger (done total=$done_count, every=$EVERY_DONE).
-[skillopt_trigger] Refine the project skill when ready:
+[skillopt_trigger] Refine the project skill when ready (subscription CLIs — no API key):
 [skillopt_trigger]   loop/skillopt_sleep.sh dry-run --backend mock
-[skillopt_trigger]   loop/skillopt_sleep.sh export   # then inspect, --i-reviewed, real backend
+[skillopt_trigger]   loop/skillopt_sleep.sh run --backend claude --i-reviewed
+[skillopt_trigger]   loop/skillopt_sleep.sh run --backend handoff --handoff-harness cursor --i-reviewed
 [skillopt_trigger]   loop/skillopt_sleep.sh status / adopt
 [skillopt_trigger] Set LOOP_KIT_SKILLOPT_TRIGGER=off to silence, or dry-run|run to auto-stage (never auto-adopts).
 EOF
@@ -142,19 +143,22 @@ run_action() {
       action="reminded"
       ;;
     dry-run|run)
-      if [[ "$TRIGGER_BACKEND" != "mock" ]]; then
-        log "threshold met, but TRIGGER_BACKEND=$TRIGGER_BACKEND is not mock — refusing auto spend; reminding instead"
-        remind_message "$since" "$done_count"
-        action="reminded-nonmock-backend"
-      else
-        log "threshold met ($since since last) — auto $TRIGGER --backend mock (no adopt)"
-        if ! bash "$ROOT/loop/skillopt_sleep.sh" "$TRIGGER" --backend mock; then
-          rc=$?
-          log "auto $TRIGGER failed (exit $rc) — not advancing trigger watermark; fix skillopt install or see logs above"
-          return "$rc"
-        fi
-        action="auto-$TRIGGER"
-      fi
+      case "$TRIGGER_BACKEND" in
+        mock|claude|codex|handoff)
+          log "threshold met ($since since last) — auto $TRIGGER --backend $TRIGGER_BACKEND (no adopt)"
+          if ! bash "$ROOT/loop/skillopt_sleep.sh" "$TRIGGER" --backend "$TRIGGER_BACKEND"; then
+            rc=$?
+            log "auto $TRIGGER failed (exit $rc) — not advancing trigger watermark; fix skillopt install or see logs above"
+            return "$rc"
+          fi
+          action="auto-$TRIGGER-$TRIGGER_BACKEND"
+          ;;
+        *)
+          log "threshold met, but TRIGGER_BACKEND=$TRIGGER_BACKEND is not mock|claude|codex|handoff — refusing; reminding instead"
+          remind_message "$since" "$done_count"
+          action="reminded-unsupported-backend"
+          ;;
+      esac
       ;;
     *)
       log "unknown LOOP_KIT_SKILLOPT_TRIGGER='$TRIGGER' — treating as off"

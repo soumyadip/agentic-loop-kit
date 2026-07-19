@@ -1,76 +1,66 @@
 # agentic-loop-kit
 
-A portable maker/checker "loop" and multi-model "council" system for
-running small, spec'd coding tasks through CLI coding agents with
-independent review. It runs a queue of small, spec'd tasks through a maker
-(a CLI harness — Codex, Claude Code, and Cursor ship built in), gates each
-attempt behind a project-specific verify script, and hands every diff to a
-*different* harness to review before it can merge — so no model ever
-grades its own homework. That same read-only checker step also stands
-alone as `review_pr.sh`, for reviewing a GitHub pull request that never
-went through the queue at all. `council.sh` is a separate, read-only
-counterpart for design questions rather than diffs: fan one out to several
-models in parallel and synthesize their independent answers yourself.
+A portable maker/checker **loop** and multi-model **council** for small,
+spec'd coding tasks — bash + markdown that shells out to CLIs already on
+your `$PATH`.
 
-This is bash + markdown templates that shell out to CLIs already on your
-`$PATH` — no project-specific machinery baked in. The parts that vary by
-project (build/test commands, which paths are governance-sensitive, which
-doc to validate milestones against, and which harnesses/models are in the
-rotation) are all config, filled in by `install.sh`.
+**What it does**
+
+- Runs a queue of tasks through a maker CLI (Codex, Claude Code, Cursor)
+- Gates each attempt behind your project's verify script
+- Hands every diff to a *different* harness before merge (no self-review)
+- Also stands alone as `review_pr.sh` for GitHub PRs that never hit the queue
+- `council.sh` fans design questions to several models in parallel (read-only)
+
+**What's config (not code)** — filled in by `install.sh`:
+
+- Build/test commands
+- Governance-sensitive paths
+- Principles + roadmap docs
+- Which harnesses/models sit in the maker/checker ring
 
 ## Harnesses (and models) are pluggable
 
-Which CLIs — and which models — act as maker and checker is data, not
-hardcoded logic. Each harness is a small adapter — `loop/harnesses/<name>.sh`
-— implementing three functions (`harness_maker_run`, `harness_reviewer_run`,
-`harness_reviewer_mode_note`; see `loop/harnesses/TEMPLATE.sh.example` for
-the exact contract). `loop/run.sh` itself has no per-harness special-casing
-left: it reads `LOOP_KIT_HARNESSES` (space-separated *members*, order
-matters — see below), sources the right adapter file right before each
-call, and reviews in a ring (each member is checked by the next one in the
-list, wrapping around).
+Which CLIs — and which models — act as maker and checker is **data**, not
+hardcoded logic.
 
-A member is a bare harness name (`cursor`) or `harness:model`
-(`cursor:grok-4.5-high`), pinning a model. That means a harness that fronts
-several model families by itself — Cursor and opencode both do — can fill
-more than one seat in the rotation on its own:
-`LOOP_KIT_HARNESSES="cursor:grok-4.5-high cursor:claude-4.5-sonnet"` is a
-valid 2-member rotation using a single CLI, since a diff made under one
-model family is still meaningfully checked by a different one. Needs ≥2
-members total (not necessarily ≥2 distinct harnesses), and no two members
-may be identical — that would be genuine self-review.
+| Piece | Role |
+|---|---|
+| `loop/harnesses/<name>.sh` | Adapter: `harness_maker_run`, `harness_reviewer_run`, `harness_reviewer_mode_note` (see `TEMPLATE.sh.example`) |
+| `LOOP_KIT_HARNESSES` | Space-separated *members*, order = review ring |
+| `loop/run.sh` | No per-harness special-casing — sources the adapter right before each call |
 
-Codex, Claude Code, and Cursor ship as built-in adapters; drop any subset,
-reorder them, repeat one with different pinned models, or add a new harness
-(aider, gemini-cli, opencode, an internal tool) by writing an adapter
-against that interface — `loop/new_harness.sh <name>` scaffolds the file
-for you.
+**Member syntax**
 
-`council.sh` (see below) reuses the exact same adapter files and member-spec
-syntax through a fourth function, `harness_council_run`, but is configured
-independently via `LOOP_KIT_COUNCIL_HARNESSES` — it's a different job
-(several models answering one question in parallel, no cross-visibility,
-no ring, no ≥2/distinctness requirement) from the maker/checker rotation
-above, so the two lists don't have to match.
+- Bare harness: `cursor` (uses that harness's project default model)
+- Pinned model: `cursor:grok-4.5-high`
+- One multi-model CLI can fill multiple seats, e.g.  
+  `LOOP_KIT_HARNESSES="cursor:grok-4.5-high cursor:claude-4.5-sonnet"`
+- Need ≥2 members total (not necessarily ≥2 distinct harnesses)
+- No two members may be identical (that would be self-review)
+
+**Built-ins:** Codex, Claude Code, Cursor. Drop any subset, reorder, pin
+different models, or add a harness with `loop/new_harness.sh <name>`.
+
+**Council** reuses the same adapters via `harness_council_run`, but is
+configured separately (`LOOP_KIT_COUNCIL_HARNESSES`). Different job: parallel
+opinions, no ring, no ≥2 rule — the two lists need not match.
 
 ## Prerequisites
 
-The loop only orchestrates CLIs it doesn't ship — install and authenticate
-whichever of these you intend to use as makers/checkers:
+Install and authenticate only the CLIs you put in your rotation:
 
-- [`codex`](https://github.com/openai/codex) — built-in harness
-- [`claude`](https://claude.com/claude-code) — built-in harness
-- [`cursor-agent`](https://cursor.com/cli) — built-in harness
-- [`opencode`](https://opencode.ai) — optional, ships a council-only adapter (used by `council.sh`'s default rotation); its maker/checker functions are left as TODO stubs, see `loop/README.md`
+| CLI | Role |
+|---|---|
+| [`codex`](https://github.com/openai/codex) | Built-in maker/checker |
+| [`claude`](https://claude.com/claude-code) | Built-in maker/checker |
+| [`cursor-agent`](https://cursor.com/cli) | Built-in maker/checker |
+| [`opencode`](https://opencode.ai) | Optional; council-only adapter by default (maker/checker are stubs — see `loop/README.md`) |
 
-You don't need all three maker/checker built-in harnesses on day one —
-only whichever ones you list in `LOOP_KIT_HARNESSES` (install.sh asks). A
-2-harness rotation (e.g. `codex claude`) only needs those two CLIs
-installed. Separately, `LOOP_KIT_COUNCIL_HARNESSES` (default `codex
-opencode claude`) only needs whichever CLIs it names.
+Also required: `python3`, `git` (worktrees — load-bearing), `bash` 4+.
 
-Also needed: `python3` (template rendering, backoff-timestamp parsing),
-`git` (worktrees — this is load-bearing, not optional), and `bash` 4+.
+A 2-harness rotation (e.g. `codex claude`) only needs those two CLIs.
+`LOOP_KIT_COUNCIL_HARNESSES` only needs the CLIs it names.
 
 ## Install into a project
 
@@ -78,79 +68,66 @@ Also needed: `python3` (template rendering, backoff-timestamp parsing),
 ./install.sh /path/to/your-repo
 ```
 
-Run without flags against a terminal, it prompts for the things that are
-genuinely per-project (see below) with sensible defaults; pass
-`--non-interactive` plus flags to script it. See `install.sh --help` for
-the full flag list.
+| Mode | Behavior |
+|---|---|
+| Interactive (default) | Prompts with a short **why / loop impact** blurb each step |
+| `--non-interactive` + flags | Scripted; see `./install.sh --help` |
+| `--update` / `--upgrade` | Refresh kit files; keep `loop.config.sh`; re-prompt SkillOpt |
+| `--force` | Fresh install that also overwrites `loop.config.sh` |
 
-This copies `loop/` (including `loop/harnesses/`) and Claude Code skills
-(`.claude/skills/council/`, `new-task/`, `skillopt-sleep/`, `project-loop/`)
-into the target repo, writes `loop/loop.config.sh` with your answers, and does a
-one-time text substitution of the `{{PLACEHOLDER}}` tokens baked into the
-prompt templates. If `loop/loop.config.sh` already exists, a plain re-run
-refuses — use `--update` (alias `--upgrade`) to refresh kit-managed files
-while keeping that config, or `--force` to overwrite config too. If you list a
-harness that isn't one of the three built-ins, install still completes but
-tells you to run `loop/new_harness.sh <name>` in the target repo afterward —
-a CLI this kit has never seen needs a human to write its ~20-line adapter once.
+**What install does**
 
-## What's actually per-project (the customization checklist)
+1. Copies `loop/` + Claude skills (`council`, `new-task`, `skillopt-sleep`, `project-loop`)
+2. Writes `loop/loop.config.sh` from your answers
+3. Substitutes `{{PLACEHOLDER}}` tokens in prompt templates
 
-`install.sh` prompts for all of these; you can also hand-edit
-`loop/loop.config.sh` afterward at any time.
+A plain re-run refuses if config already exists — use `--update` or `--force`.
+Unknown harness names still install; run `loop/new_harness.sh <name>` afterward.
 
-1. **Build/test commands** (`LOOP_KIT_BUILD_CMD` / `LOOP_KIT_TEST_CMD`) —
-   what `loop/verify.sh` runs after every maker attempt, before a diff is
-   eligible for review. Defaults to `make build`/`make test`; point these
-   at whatever your project actually uses.
-2. **Sensitive-path regex** (`LOOP_KIT_SENSITIVE_PATTERN`) — diffs
-   touching a matching path always go to `loop/queue/blocked/` for a
-   human, no matter what verify or the checker say. The shipped default
-   (`deploy/`, `secrets`, `.github/workflows/`) covers what's dangerous in
-   nearly any repo; add your own ADRs, provider-interface specs, or
-   schema-of-record files.
-3. **Working-principles doc** (`LOOP_KIT_PRINCIPLES_DOC`, default
-   `AGENTS.md`) — the task/review prompt templates point makers and
-   reviewers at this for working principles (TDD, architectural
-   constraints, whatever your project cares about). Make sure it exists
-   and actually says something; the templates degrade gracefully
-   ("if it exists" / "if it calls for TDD") if it doesn't, but a loop
-   with no stated principles document has much less to hold makers to.
-4. **Roadmap/milestone doc** (`LOOP_KIT_ROADMAP_DOC`, default
-   `docs/roadmap.md`) — if set and the file exists, `new_task.sh` requires
-   every task's `milestone:` frontmatter to match a `## <id> — ...`
-   heading in it. Set to empty (`none` at the interactive prompt) if your
-   project doesn't track milestones as a doc.
-5. **Which harnesses/models, in what order** (`LOOP_KIT_HARNESSES`, default
-   `codex claude cursor`) — the maker/checker rotation. Order sets the
-   review ring (each member is checked by the next one in the list).
-   Entries can be a bare harness (`cursor`) or `harness:model`
-   (`cursor:grok-4.5-high`) to pin a model — needs ≥2 entries, not
-   necessarily ≥2 distinct harnesses, so `cursor:grok-4.5-high
-   cursor:claude-4.5-sonnet` is a valid rotation on one CLI. install.sh
-   prompts for the list, then for each *bare* built-in entry, a default
-   model (used for both its maker-default and checker roles — hand-edit
-   `loop.config.sh` afterward if you want to split those, or tier
-   `quick`/`gnarly` maker models differently; see `loop.config.sh.example`
-   for every knob). Naming a harness that isn't one of the three built-ins
-   gets it written into the config anyway, with a note to scaffold its
-   adapter via `loop/new_harness.sh` before it'll actually work.
-6. **The red-team adversarial mandate** — *not* prompted for, because it's
-   not a fill-in-the-blank field. `loop/review_prompt.tpl.md` (the single
-   template shared by every checker — see below) ships with
-   a generic numbered mandate (mocked-vs-real dependencies, boundary/
-   type-coercion bugs, auth fail-closed behavior, audit completeness, test
-   reachability, injection, idempotency). Once your loop has caught a few
-   real bugs, add your own project-specific items ahead of the generic
-   ones — name the exact recurring failure mode, the way you'd write a
-   postmortem action item. This is where a lot of the system's real value
-   compounds over time, and it's deliberately left as a TODO rather than
-   auto-generated, because generic advice here is much weaker than a
-   lesson your project actually learned. Optionally, Microsoft SkillOpt-Sleep
-   (`loop/skillopt_sleep.sh`) can propose gated edits to the LEARNED block
-   of `.claude/skills/project-loop/SKILL.md` from `loop/log/` evidence — see
-   `loop/README.md`'s "SkillOpt-Sleep" section; still human-adopted, not
-   auto-written into the mandate.
+## What's actually per-project
+
+Prompts below (or hand-edit `loop/loop.config.sh` anytime). Full flags:
+`./install.sh --help`.
+
+### Core loop
+
+| Prompt | Config / default | Why | Loop impact |
+|---|---|---|---|
+| Build command | `LOOP_KIT_BUILD_CMD` → `make build` | Without a real build/typecheck, broken work reaches review | `verify.sh` after every maker attempt; fail → retry; pass → review |
+| Test command | `LOOP_KIT_TEST_CMD` → `make test` | Acceptance must be executable, not prose-only | Same gate as build |
+| Sensitive-path regex | `LOOP_KIT_SENSITIVE_PATTERN` | Secrets/deploy/CI must not auto-merge because two models agreed | Matching diffs → `queue/blocked/` regardless of VERDICT |
+| Sensitive-path description | Prompt-only (not in config) | Reviewers need plain language, not only a regex | Baked into `{{SENSITIVE_DESC}}` in review templates |
+| Principles doc | `LOOP_KIT_PRINCIPLES_DOC` → `AGENTS.md` | Fresh-context agents need one authoritative TDD/architecture file | Every task + review prompt points here |
+| Roadmap doc | `LOOP_KIT_ROADMAP_DOC` → `docs/roadmap.md` (`none` = off) | Keeps the queue tied to real roadmap work | `new_task.sh` rejects unknown `milestone:` values |
+| Harnesses ring | `LOOP_KIT_HARNESSES` (≥2; `harness` or `harness:model`) | No model grades its own homework | Order = review ring; bare built-ins also ask for a default model |
+| Council members | `LOOP_KIT_COUNCIL_HARNESSES` | ADRs benefit from parallel disagreement | Only `council.sh` — unused by `run.sh` |
+
+Default sensitive regex covers `deploy/`, `secrets`, `.github/workflows/` —
+add your own schema-of-record paths.
+
+### SkillOpt-Sleep (install + `--update`)
+
+Optional. Interactive fresh install leans toward installing the package and
+writing `~/.skillopt-sleep/config.json` if missing. On `--update`, existing
+`LOOP_KIT_SKILLOPT_*` values are the defaults; package install defaults to **no**.
+
+| Prompt | Config / flag | Why | Loop impact |
+|---|---|---|---|
+| Install package? | `--with-skillopt` / `--no-skillopt` | Without it, `skillopt_sleep.sh` cannot run | Optional; `run.sh` only nudges when TRIGGER is set |
+| Source | `pip` or `git` | Handoff landed after PyPI 0.2.0 — use `git` for Cursor/opencode | Which Sleep features work (subscription CLIs; no API keys) |
+| Backend | `LOOP_KIT_SKILLOPT_BACKEND` → `mock\|claude\|codex\|handoff` | Prefer logged-in CLIs over API keys | Default `--backend` for manual + auto dry-run/run |
+| Activity trigger | `LOOP_KIT_SKILLOPT_TRIGGER` → `remind` | Easy to forget; remind surfaces it without spend | `skillopt_trigger.sh` after done thresholds; **never auto-adopts** |
+| Every N done | `LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE` → `10` | Relative watermark matches real usage | `0` = never fire |
+| Trigger backend | `LOOP_KIT_SKILLOPT_TRIGGER_BACKEND` → `mock` | Auto paths should stay cheap until you opt in | Ignored for `remind` / `off` |
+| Handoff harness | `LOOP_KIT_SKILLOPT_HANDOFF_HARNESS` | Cursor/opencode aren't native Sleep backends | Used when backend is `handoff` |
+| Engine config | `~/.skillopt-sleep/config.json` | Sleep reads home-dir config | Does not change `loop.config.sh` |
+
+### Not prompted (edit by hand)
+
+**Red-team mandate** — `loop/review_mandate.partial.md` ships generic.
+Sharpen it after real bugs slip through. SkillOpt can propose gated edits to
+the LEARNED block of `.claude/skills/project-loop/SKILL.md` (human adopt
+only) — see `loop/README.md` → SkillOpt-Sleep.
 
 ## Layout of this kit
 
@@ -165,16 +142,15 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
   new_task.sh                scaffolds a new queue task file
   new_harness.sh             scaffolds a new loop/harnesses/<name>.sh adapter
   skillopt_export.sh         export loop/log + queue outcomes → SkillOpt-Sleep tasks JSON
-  skillopt_sleep.sh          wrapper: export → skillopt-sleep dry-run/run/status/adopt
+  skillopt_sleep.sh          wrapper: export → skillopt-sleep (claude/codex/handoff)
+  skillopt_handoff.sh        answer Sleep handoff prompts via harness_council_run
   skillopt_trigger.sh        activity triggers from run.sh (remind/dry-run/run; never auto-adopt)
   skillopt-sleep.config.json.example   optional ~/.skillopt-sleep/config.json starter
   loop.config.sh.example     documents every LOOP_KIT_* setting
   task_prompt.tpl.md          single maker prompt template, shared by every harness
   review_prompt.tpl.md        review prompt for queue tasks
-  pr_review_prompt.tpl.md     review prompt for review_pr.sh — both share
-                               review_mandate.partial.md (the red-team/bug-report/
-                               adjudication/verdict block) and run.sh fills in one
-                               {{REVIEWER_MODE_NOTE}} line per harness into either one
+  pr_review_prompt.tpl.md     review prompt for review_pr.sh
+  review_mandate.partial.md   shared red-team / verdict block (injected into both review templates)
   council_prompt.tpl.md      council member prompt template
   harnesses/
     codex.sh, claude.sh, cursor.sh   built-in maker/checker/council adapters
@@ -188,32 +164,27 @@ skills/
   project-loop/SKILL.md      trainable project skill (SkillOpt-Sleep LEARNED target)
 ```
 
-`loop/README.md` is the full operational writeup (queue semantics, retry/
-backoff behavior, the review cycle, what this does and doesn't remove
-from your review burden) — read it once installed, or read the copy in
-this kit before installing to decide if this is the right fit for your
-project.
+`loop/README.md` is the full operational writeup (queue, retry/backoff,
+review cycle, what this does and doesn't remove from your review burden).
+Read it once installed — or from this kit before installing.
 
 ## What this is not
 
-It's not a hosted service, a package you `npm install`, or something with
-a stable API to version against — it's a copy-and-own starter kit. After
-`install.sh` runs, the copy in your target repo is yours; there's no live
-link back to this kit unless you build one yourself (git subtree, a sync
-script, whatever fits). Pulling in a kit update later:
+Not a hosted service, not an `npm` package, not a versioned API — a
+**copy-and-own** starter kit. After `install.sh`, the copy in your target
+repo is yours.
 
 ```sh
 ./install.sh /path/to/your-repo --update    # or --upgrade
 ```
 
-That refreshes scripts, prompt templates, built-in harness adapters, docs,
-and thin skills (`council`, `new-task`, `skillopt-sleep`), re-applies
-install-time `{{PLACEHOLDER}}` substitution from your existing config, and
-appends any newly introduced `LOOP_KIT_*` keys that are still missing.
-It **keeps** `loop/loop.config.sh`, leaves `queue/`/`log/`/`state/` alone,
-does not overwrite `review_mandate.partial.md` or
-`.claude/skills/project-loop/SKILL.md` when those already exist (so red-team
-and LEARNED customizations survive), and does not delete custom
-`loop/harnesses/<name>.sh` adapters you scaffolded. Use `--force` only when
-you intentionally want a regenerated config (then restore tuned settings
-from git).
+| `--update` keeps | `--update` refreshes |
+|---|---|
+| `loop/loop.config.sh` | Scripts, templates, built-in harnesses, docs |
+| `queue/` / `log/` / `state/` | Thin skills (`council`, `new-task`, `skillopt-sleep`) |
+| Existing `review_mandate.partial.md` | Install-time `{{PLACEHOLDER}}` substitution |
+| Existing `project-loop/SKILL.md` | Missing `LOOP_KIT_*` keys (appended) |
+| Custom `loop/harnesses/<name>.sh` | — |
+
+Use `--force` only when you intentionally want a regenerated config (then
+restore tuned settings from git).

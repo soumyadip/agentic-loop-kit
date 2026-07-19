@@ -113,10 +113,18 @@ LOOP_KIT_COUNCIL_HARNESSES="codex opencode claude"
 # edits to the LEARNED block only when a held-out gate improves. Requires `pip install skillopt`
 # (or `uv tool install skillopt`). See loop/README.md "SkillOpt-Sleep".
 #
+# Backends (subscription-first — no Anthropic/OpenAI API key required for these):
+#   mock     — plumbing only
+#   claude   — logged-in Claude Code CLI (`claude -p`)
+#   codex    — logged-in Codex CLI (`codex exec`)
+#   handoff  — Sleep writes prompts; loop/skillopt_handoff.sh answers via harness_council_run
+#              (claude / codex / cursor). Needs SkillOpt newer than PyPI 0.2.0 for handoff.
+#
 # Engine defaults that aren't CLI flags (evolve_memory=false, gate_mode=on, …) live in
 # ~/.skillopt-sleep/config.json — start from loop/skillopt-sleep.config.json.example.
 LOOP_KIT_SKILLOPT_SKILL_PATH=".claude/skills/project-loop/SKILL.md"
 LOOP_KIT_SKILLOPT_BACKEND="mock"          # mock | claude | codex | handoff
+LOOP_KIT_SKILLOPT_HANDOFF_HARNESS=""      # empty = first LOOP_KIT_HARNESSES member (e.g. claude)
 LOOP_KIT_SKILLOPT_TASKS_FILE=""           # empty = loop/state/skillopt-tasks.json
 LOOP_KIT_SKILLOPT_MAX_TASKS="40"
 LOOP_KIT_SKILLOPT_EDIT_BUDGET="4"
@@ -125,10 +133,10 @@ LOOP_KIT_SKILLOPT_EDIT_BUDGET="4"
 # Activity triggers from loop/run.sh (see loop/skillopt_trigger.sh). Thresholds are *since
 # last successful trigger* (loop/state/skillopt-trigger.json), not absolute done/ size.
 #   off      — never nudge / auto-run from the loop
-#   remind   — print how to run SkillOpt when the threshold is hit (default; no API)
-#   dry-run  — auto export + dry-run (mock unless TRIGGER_BACKEND set; never adopts)
+#   remind   — print how to run SkillOpt when the threshold is hit (default; no model)
+#   dry-run  — auto export + dry-run (never adopts)
 #   run      — auto export + run (stages only; never auto-adopts)
 LOOP_KIT_SKILLOPT_TRIGGER="remind"
 LOOP_KIT_SKILLOPT_TRIGGER_EVERY_DONE="10"   # 0 = disable count-based firing
 LOOP_KIT_SKILLOPT_TRIGGER_ON_RUN_END="1"    # 1 = evaluate at end of run.sh; 0 = after each done/
-# LOOP_KIT_SKILLOPT_TRIGGER_BACKEND="mock"  # auto dry-run/run only; non-mock falls back to remind
+LOOP_KIT_SKILLOPT_TRIGGER_BACKEND="mock"    # mock | claude | codex | handoff for auto dry-run/run

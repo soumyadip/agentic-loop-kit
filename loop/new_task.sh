@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Scaffold a new loop/queue/pending/Txxx-<slug>.md file with correct frontmatter, so
 # neither a human nor an agent has to re-derive the next task id, the milestone-id
-# convention, or the sensitive-path rule by reading run.sh/README.md every time.
+# convention, or the require-human-review path rule by reading run.sh/README.md every time.
 #
 # Usage:
 #   loop/new_task.sh <slug> <milestone> [sensitive] [depends_on,comma,separated]
@@ -9,8 +9,12 @@
 # Example:
 #   loop/new_task.sh add-health-endpoint M1 false T003
 #
+# The optional [sensitive] flag (true/false) marks the *task* as always requiring human
+# sign-off — same outcome as LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS matching the diff. Prefer the
+# path regex for recurring directories; use the frontmatter flag for one-off tasks.
+#
 # This only writes the frontmatter + section skeleton (Why/Scope/Acceptance criteria) —
-# you still write the actual task content.  It does not touch
+# you still write the actual task content. It does not touch
 # loop/queue/{in_progress,blocked,done}/ or move anything.
 set -uo pipefail
 

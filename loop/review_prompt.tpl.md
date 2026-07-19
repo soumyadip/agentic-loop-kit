@@ -20,7 +20,7 @@ This worktree is on branch {{BRANCH}}, diffed against `main`. Read:
 - Does the diff actually satisfy every acceptance criterion, not just plausibly resemble doing so? Run whatever you need to (tests, the actual command, a manual trace through the logic) — do not approve on read-through alone if it's checkable.
 - If this task changed application code, does the diff include a test that fails without the change and passes with it (TDD, per `{{PRINCIPLES_DOC}}`'s working principles, if it states one)? Application code with no corresponding test is a `request_changes`, not a nitpick — say exactly what test is missing. Pure design/infra glue (ADR text, compose files, shell scripts) is exempt if it was actually run and its output honestly recorded.
 - Did it stay in scope, or did it touch files the task didn't ask for?
-- Does it contradict any architecture decision, interface contract, or other authoritative doc this project maintains? ({{SENSITIVE_DESC}} are worth checking against explicitly — see `{{PRINCIPLES_DOC}}` for where those live in this project.)
+- Does it contradict any architecture decision, interface contract, or other authoritative doc this project maintains? ({{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}} are worth checking against explicitly — see `{{PRINCIPLES_DOC}}` for where those live in this project.)
 - Is there an obvious correctness bug, security issue, or piece of dead/half-finished code a careful human reviewer would flag?
 
 Do not nitpick style choices that don't violate anything written down. This is a verification pass, not a taste pass.

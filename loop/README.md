@@ -114,7 +114,7 @@ what happened — that's the point.
 ```
 loop/queue/pending/      not started (filename order: T001 before T002)
 loop/queue/in_progress/  current task (crash detection)
-loop/queue/blocked/      failed twice, or sensitive path — needs you
+loop/queue/blocked/      failed twice, or require-human-review path / sensitive:true — needs you
 loop/queue/done/         merged
 loop/log/<task-id>/      maker / verify / review transcripts
 loop/state/backoff.txt   usage-limit cooldowns
@@ -150,8 +150,9 @@ touch your main branch directly.
 4. **Verify** — `loop/verify.sh` in the worktree.
 5. **Retry on verify fail** — up to `LOOP_MAX_RETRIES` (default 2); fresh
    maker prompt each time (reads failure off disk).
-6. **Sensitive paths** — matching diffs always → `blocked/` (human), even
-   if verify + review would pass.
+6. **Require-human-review paths** — if any changed path matches
+   `LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS`, skip review and → `blocked/` for you
+   (never auto-merge). Separate from the optional prompt **label**.
 7. **Review** — next member in the ring; `harness_reviewer_run` (read-only).
    - `approve` → merge to `main`, → `done/`
    - `request_changes` → retry (step 5) with checker comments
@@ -189,10 +190,22 @@ roadmap; this queue is the cut-down pieces.
 |---|---|
 | `milestone:` | Required if `LOOP_KIT_ROADMAP_DOC` is set — must match a `## <id> — …` heading |
 | `maker:` | Route to a specific ring member (must be in `LOOP_KIT_HARNESSES`) |
-| `sensitive: true` | Always → `blocked/` for human sign-off |
+| `sensitive: true` | Always → `blocked/` for human sign-off (same outcome as `LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS` matching the diff; use for one-off tasks) |
 | `network_access: true` | Allow live local services (only adapters with a sandbox network toggle honor this; Codex is the built-in example) |
 | `depends_on: [T001, …]` | Claim only after listed ids are in `done/` |
 | `complexity:` | `quick` / `default` / `gnarly` — maker model tier |
+
+### Require-human-review path gate
+
+`LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS` is an extended regex of path prefixes. After
+verify succeeds, if **any** path in the diff matches, the task goes to
+`queue/blocked/` and the checker is skipped — two models cannot auto-merge
+those paths.
+
+The install-time **label** (`--require-human-review-paths-label`) only appears in
+review prompts (`{{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}}`). It does not enforce the
+gate. Prefer the regex for recurring directories (deploy, secrets, ADRs);
+use `sensitive: true` on a task for one-offs.
 
 ## Reviewing a GitHub pull request
 

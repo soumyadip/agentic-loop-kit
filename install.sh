@@ -61,15 +61,20 @@ Use --non-interactive plus flags to skip prompts.
                               Why: acceptance criteria must be checkable, not prose-only.
                               Loop impact: same as build — gates eligibility for review/merge.
 
-  --sensitive-pattern REGEX  paths that always block for a human (never auto-merge)
+  --require-human-review-paths REGEX
+                             path prefixes that always require a human (never auto-merge)
                               (default: ^(deploy/|secrets|\.github/workflows/))
-                              Why: governance/secrets must not self-approve via two models.
-                              Loop impact: matching diffs → queue/blocked/ even if verify+review OK.
+                              Why: secrets/deploy/CI must not self-approve via two models.
+                              Loop impact: matching diffs → queue/blocked/ *before* review;
+                              checker never runs. Alias: --sensitive-pattern (old name).
 
-  --sensitive-desc "TEXT"    human label for those paths, baked into review prompts
+  --require-human-review-paths-label "TEXT"
+                             plain-language label for those paths, for review prompts only
                               (default: "deploy configs, secrets, CI workflows")
-                              Why: reviewers need plain language, not only a regex.
-                              Loop impact: appears in review templates; not stored in loop.config.sh.
+                              Why: reviewers need prose; the regex alone is easy to miss.
+                              Loop impact: baked into {{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}} in review
+                              templates — does *not* drive the gate. Not stored in
+                              loop.config.sh. Alias: --sensitive-desc (old name).
 
   --principles-doc PATH      working-principles doc makers/reviewers must read
                               (default: AGENTS.md)
@@ -201,17 +206,19 @@ copy_kit_files() {
   fi
 }
 
-# Install-time substitution of {{SENSITIVE_DESC}} / {{PRINCIPLES_DOC}} / {{ROADMAP_DOC}}.
-# Distinct from per-task tokens rendered by run.sh.
+# Install-time substitution of {{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}} / {{PRINCIPLES_DOC}} /
+# {{ROADMAP_DOC}}. Also replaces legacy {{SENSITIVE_DESC}} so older preserved templates
+# still get the label. Distinct from per-task tokens rendered by run.sh.
 substitute_placeholders() {
-  local target="$1" sensitive_desc="$2" principles_doc="$3" roadmap_doc="$4"
-  python3 - "$target" "$sensitive_desc" "$principles_doc" "$roadmap_doc" <<'PY'
+  local target="$1" require_human_review_paths_label="$2" principles_doc="$3" roadmap_doc="$4"
+  python3 - "$target" "$require_human_review_paths_label" "$principles_doc" "$roadmap_doc" <<'PY'
 import glob
 import sys
 
-target, sensitive_desc, principles_doc, roadmap_doc = sys.argv[1:5]
+target, label, principles_doc, roadmap_doc = sys.argv[1:5]
 repls = {
-    "{{SENSITIVE_DESC}}": sensitive_desc,
+    "{{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}}": label,
+    "{{SENSITIVE_DESC}}": label,  # legacy token from before the rename
     "{{PRINCIPLES_DOC}}": principles_doc,
     "{{ROADMAP_DOC}}": roadmap_doc or "(none configured)",
 }
@@ -238,9 +245,20 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
+notes = []
 
 def has(key: str) -> bool:
     return re.search(rf"(?m)^\s*{re.escape(key)}=", text) is not None
+
+# Rename legacy LOOP_KIT_SENSITIVE_PATTERN → LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS when needed.
+if has("LOOP_KIT_SENSITIVE_PATTERN") and not has("LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS"):
+    text = re.sub(
+        r"(?m)^(\s*)LOOP_KIT_SENSITIVE_PATTERN=",
+        r"\1LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS=",
+        text,
+        count=1,
+    )
+    notes.append("renamed LOOP_KIT_SENSITIVE_PATTERN → LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS")
 
 # (key, lines to append when missing) — keep comments with the knobs they describe.
 blocks = [
@@ -300,9 +318,12 @@ for key, lines in blocks:
     text = text.rstrip() + "\n" + "\n".join(lines) + "\n"
     added.append(key)
 
-if added:
+if notes or added:
     path.write_text(text, encoding="utf-8")
-    print("appended missing config keys: " + ", ".join(added))
+    parts = list(notes)
+    if added:
+        parts.append("appended missing config keys: " + ", ".join(added))
+    print("; ".join(parts))
 else:
     print("config already has known optional keys (nothing appended)")
 PY
@@ -525,8 +546,8 @@ target="$1"; shift
 
 build_cmd="make build"
 test_cmd="make test"
-sensitive_pattern='^(deploy/|secrets|\.github/workflows/)'
-sensitive_desc="deploy configs, secrets, CI workflows"
+require_human_review_paths='^(deploy/|secrets|\.github/workflows/)'
+require_human_review_paths_label="deploy configs, secrets, CI workflows"
 principles_doc="AGENTS.md"
 roadmap_doc="docs/roadmap.md"
 harnesses="$BUILTIN_HARNESSES"
@@ -555,8 +576,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --build-cmd) build_cmd="$2"; shift 2 ;;
     --test-cmd) test_cmd="$2"; shift 2 ;;
-    --sensitive-pattern) sensitive_pattern="$2"; shift 2 ;;
-    --sensitive-desc) sensitive_desc="$2"; shift 2 ;;
+    --require-human-review-paths|--sensitive-pattern) require_human_review_paths="$2"; shift 2 ;;
+    --require-human-review-paths-label|--sensitive-desc) require_human_review_paths_label="$2"; shift 2 ;;
     --principles-doc) principles_doc="$2"; shift 2 ;;
     --roadmap-doc) roadmap_doc="$2"; shift 2 ;;
     --harnesses) harnesses="$2"; shift 2 ;;
@@ -638,11 +659,12 @@ if [[ "$mode" == "update" ]]; then
 
   if [[ "$non_interactive" != 1 && -t 0 ]]; then
     ask \
-"Human label for governance-sensitive paths, baked into review prompt text (not stored in loop.config.sh).
-Why: reviewers see prose, not only LOOP_KIT_SENSITIVE_PATTERN.
-Loop impact: substituted into {{SENSITIVE_DESC}} in review templates on this update." \
-      "Sensitive-path description for prompt text" "$sensitive_desc"
-    sensitive_desc="$REPLY"
+"Plain-language label for paths that always require a human — for review prompts only
+(not the gate; the regex above is the gate). Not stored in loop.config.sh.
+Why: reviewers see prose, not only LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS.
+Loop impact: substituted into {{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}} in review templates." \
+      "Require-human-review paths label (prompt text only)" "$require_human_review_paths_label"
+    require_human_review_paths_label="$REPLY"
 
     prompt_skillopt_settings
   fi
@@ -656,7 +678,7 @@ Loop impact: substituted into {{SENSITIVE_DESC}} in review templates on this upd
   if [[ "$non_interactive" != 1 && -t 0 ]] || (( skillopt_flag_set )); then
     apply_skillopt_choices "$target" "$target/loop/loop.config.sh"
   fi
-  substitute_placeholders "$target" "$sensitive_desc" "$principles_doc" "$roadmap_doc"
+  substitute_placeholders "$target" "$require_human_review_paths_label" "$principles_doc" "$roadmap_doc"
   warn_missing_adapters "$target" $harnesses $council_harnesses
 
   log "done. Updated scripts, templates, built-in harnesses, docs, and thin skills."
@@ -675,7 +697,7 @@ if [[ "$non_interactive" != 1 && -t 0 ]]; then
   ask \
 "Command loop/verify.sh runs after every maker attempt (build/compile/typecheck).
 Why: without a real gate, broken work still reaches the checker and can merge.
-Loop impact: fail → retry maker with the log; pass → sensitive-path check then review." \
+Loop impact: fail → retry maker with the log; pass → require-human-review path check then review." \
     "Build command" "$build_cmd"
   build_cmd="$REPLY"
 
@@ -687,18 +709,20 @@ Loop impact: same as build — blocks review until green." \
   test_cmd="$REPLY"
 
   ask \
-"Extended regex of path prefixes that always go to queue/blocked/ for a human.
-Why: deploy/secrets/CI (and your ADRs/schemas) must not auto-merge via two models agreeing.
-Loop impact: matching diffs skip auto-review merge regardless of VERDICT." \
-    "Sensitive-path regex" "$sensitive_pattern"
-  sensitive_pattern="$REPLY"
+"Regex of path prefixes that ALWAYS require a human — matching diffs skip the checker
+and go to queue/blocked/ (never auto-merge), even if verify passed.
+Default covers deploy/, secrets, .github/workflows/; add ADRs/schemas as needed.
+Why: two models agreeing must not merge secrets/deploy/CI unsupervised.
+Loop impact: hard gate after verify; see also the label prompt next (prompt text only)." \
+    "Require-human-review paths (regex gate)" "$require_human_review_paths"
+  require_human_review_paths="$REPLY"
 
   ask \
-"Plain-language label for those sensitive paths, baked into review prompts.
+"Plain-language label for those paths — used in review prompts only, NOT the gate.
 Why: reviewers need prose; the regex alone is easy to miss.
-Loop impact: {{SENSITIVE_DESC}} in review templates (not written to loop.config.sh)." \
-    "Sensitive-path description" "$sensitive_desc"
-  sensitive_desc="$REPLY"
+Loop impact: {{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}} in review templates (not written to loop.config.sh)." \
+    "Require-human-review paths label (prompt text only)" "$require_human_review_paths_label"
+  require_human_review_paths_label="$REPLY"
 
   ask \
 "Doc makers and reviewers must read first (TDD, architecture, conventions).
@@ -824,7 +848,7 @@ copy_kit_files "$target" "install"
   echo "# Overwrite this config only with: install.sh <this-repo> --force"
   echo "LOOP_KIT_BUILD_CMD=\"${build_cmd}\""
   echo "LOOP_KIT_TEST_CMD=\"${test_cmd}\""
-  echo "LOOP_KIT_SENSITIVE_PATTERN='${sensitive_pattern}'"
+  echo "LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS='${require_human_review_paths}'"
   echo "LOOP_KIT_PRINCIPLES_DOC=\"${principles_doc}\""
   echo "LOOP_KIT_ROADMAP_DOC=\"${roadmap_doc}\""
   echo "LOOP_KIT_HARNESSES=\"${harnesses}\""
@@ -877,7 +901,7 @@ if (( skillopt_do_install || skillopt_engine_config || skillopt_flag_set )) \
   apply_skillopt_choices "$target" "$target/loop/loop.config.sh"
 fi
 
-substitute_placeholders "$target" "$sensitive_desc" "$principles_doc" "$roadmap_doc"
+substitute_placeholders "$target" "$require_human_review_paths_label" "$principles_doc" "$roadmap_doc"
 warn_missing_adapters "$target" $harnesses $council_harnesses
 
 log "done. Next steps:"

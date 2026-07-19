@@ -1,5 +1,5 @@
 ---
-description: Scaffold a new loop/queue/pending/Txxx-<slug>.md task file with correct frontmatter (next task id, milestone validated against the project's roadmap doc, sensitive-path awareness). Use when adding new work to the loop's task queue.
+description: Scaffold a new loop/queue/pending/Txxx-<slug>.md task file with correct frontmatter (next task id, milestone validated against the project's roadmap doc, require-human-review path awareness). Use when adding new work to the loop's task queue.
 argument-hint: [short description of the task]
 ---
 
@@ -20,11 +20,11 @@ and the `milestone:` field convention this script enforces.
    configured via `LOOP_KIT_ROADMAP_DOC` in `loop/loop.config.sh` — skip
    this if that variable is unset/empty, meaning the project doesn't
    track milestones that way), and whether the task's scope will touch a
-   sensitive path — check `SENSITIVE_PATTERN` in `loop/run.sh` (and
-   `LOOP_KIT_SENSITIVE_PATTERN` in `loop/loop.config.sh` if set). If it
-   touches any of those, `sensitive` must be `true` — the loop routes it
-   to `blocked/` for human sign-off regardless of what the maker/checker
-   conclude.
+   path that always requires a human — check `LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS`
+   in `loop/loop.config.sh` (older installs may still use
+   `LOOP_KIT_SENSITIVE_PATTERN`). If it will, pass `sensitive=true` —
+   the loop routes that task to `blocked/` for human sign-off regardless
+   of what the maker/checker conclude (same outcome as the path gate).
 2. Run `loop/new_task.sh <slug> <milestone> <true|false> [depends_on,comma,separated]`.
    It refuses to run if the milestone id doesn't exist in the roadmap doc
    (when one is configured), and picks the next task id by scanning every

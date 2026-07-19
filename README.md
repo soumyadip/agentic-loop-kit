@@ -15,7 +15,7 @@ your `$PATH`.
 **What's config (not code)** — filled in by `install.sh`:
 
 - Build/test commands
-- Governance-sensitive paths
+- Governance-sensitive paths (always require a human)
 - Principles + roadmap docs
 - Which harnesses/models sit in the maker/checker ring
 
@@ -100,21 +100,36 @@ Unknown harness names still install; run `loop/new_harness.sh <name>` afterward.
 Prompts below (or hand-edit `loop/loop.config.sh` anytime). Full flags:
 `./install.sh --help`.
 
+### Require-human-review paths (not “sensitive”)
+
+Two related knobs — easy to confuse; only the regex is a gate:
+
+| Knob | Config | Role |
+|---|---|---|
+| **Regex gate** | `LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS` | After verify: if any changed path matches → `queue/blocked/` immediately. Checker never runs; nothing auto-merges. |
+| **Prompt label** | Install `--require-human-review-paths-label` only | Plain English for those paths, baked into review templates as `{{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}}`. Does **not** block anything. |
+
+Per-task frontmatter `sensitive: true` has the **same outcome** as the regex gate (always block for a human), for one-off tasks that aren’t under a recurring path prefix.
+
+Older installs may still have `LOOP_KIT_SENSITIVE_PATTERN` — `run.sh` honors it as a fallback; `install.sh --update` renames the key.
+
 ### Core loop
 
 | Prompt | Config / default | Why | Loop impact |
 |---|---|---|---|
 | Build command | `LOOP_KIT_BUILD_CMD` → `make build` | Without a real build/typecheck, broken work reaches review | `verify.sh` after every maker attempt; fail → retry; pass → review |
 | Test command | `LOOP_KIT_TEST_CMD` → `make test` | Acceptance must be executable, not prose-only | Same gate as build |
-| Sensitive-path regex | `LOOP_KIT_SENSITIVE_PATTERN` | Secrets/deploy/CI must not auto-merge because two models agreed | Matching diffs → `queue/blocked/` regardless of VERDICT |
-| Sensitive-path description | Prompt-only (not in config) | Reviewers need plain language, not only a regex | Baked into `{{SENSITIVE_DESC}}` in review templates |
+| Require-human-review paths (regex) | `LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS` | Secrets/deploy/CI must not auto-merge because two models agreed | Matching diffs → `queue/blocked/` **before** review; checker never runs |
+| Require-human-review paths label | Prompt-only (not in config) | Reviewers need plain language, not only a regex | Baked into `{{REQUIRE_HUMAN_REVIEW_PATHS_LABEL}}` in review templates — **not** the gate |
 | Principles doc | `LOOP_KIT_PRINCIPLES_DOC` → `AGENTS.md` | Fresh-context agents need one authoritative TDD/architecture file | Every task + review prompt points here |
 | Roadmap doc | `LOOP_KIT_ROADMAP_DOC` → `docs/roadmap.md` (`none` = off) | Keeps the queue tied to real roadmap work | `new_task.sh` rejects unknown `milestone:` values |
 | Harnesses ring | `LOOP_KIT_HARNESSES` (≥2; `harness` or `harness:model`) | No model grades its own homework | Order = review ring; bare built-ins also ask for a default model |
 | Council members | `LOOP_KIT_COUNCIL_HARNESSES` | ADRs benefit from parallel disagreement | Only `council.sh` — unused by `run.sh` |
 
-Default sensitive regex covers `deploy/`, `secrets`, `.github/workflows/` —
-add your own schema-of-record paths.
+Default require-human regex covers `deploy/`, `secrets`, `.github/workflows/` —
+add your own schema-of-record paths. The **label** is only for prompt wording;
+only the **regex** blocks auto-merge. (Older name `LOOP_KIT_SENSITIVE_PATTERN`
+still works as a fallback until `--update` renames it.)
 
 ### SkillOpt-Sleep (install + `--update`)
 

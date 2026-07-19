@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 log()  { echo "[loop] $*"; }
 die()  { echo "[loop] STOP: $*" >&2; exit 1; }
 
-# Per-repo settings written by install.sh (build/test commands, sensitive-path pattern, etc.) —
+# Per-repo settings written by install.sh (build/test commands, require-human-review path gate, etc.) —
 # see loop.config.sh.example. Safe to be absent: every var it might set has a generic fallback
 # below via ${VAR:-default}.
 [[ -f "$ROOT/loop/loop.config.sh" ]] && source "$ROOT/loop/loop.config.sh"
@@ -96,12 +96,13 @@ REVIEW_BREAK_ATTEMPTS="${LOOP_REVIEW_BREAK_ATTEMPTS:-1}"
 if (( REVIEW_BREAK_ATTEMPTS < 1 )); then REVIEW_BREAK_ATTEMPTS=1; fi
 if (( REVIEW_BREAK_ATTEMPTS > 3 )); then REVIEW_BREAK_ATTEMPTS=3; fi
 
-# Diffs touching any of these always go to blocked/ for a human, regardless of verify or the
-# checker's verdict — governance-sensitive changes don't get to self-approve. Override via
-# LOOP_KIT_SENSITIVE_PATTERN in loop.config.sh (install.sh prompts for this); the default below
-# covers the paths that are dangerous in nearly any repo (deploy config, secrets, CI). Add your
-# own project's ADRs/provider-interface specs/schema-of-record files to the regex.
-SENSITIVE_PATTERN="${LOOP_KIT_SENSITIVE_PATTERN:-^(deploy/|secrets|\.github/workflows/)}"
+# Diffs whose paths match this regex always go to queue/blocked/ for a human — verify may
+# have passed, but the checker never runs and nothing auto-merges. This is the "always require
+# a human" path gate (not a soft hint). Override via LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS in
+# loop.config.sh (older installs may still set LOOP_KIT_SENSITIVE_PATTERN — honored as a
+# fallback). Default covers deploy config, secrets, and CI; add your ADRs / interface specs /
+# schema-of-record paths to the regex.
+REQUIRE_HUMAN_REVIEW_PATHS="${LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS:-${LOOP_KIT_SENSITIVE_PATTERN:-^(deploy/|secrets|\.github/workflows/)}}"
 
 mkdir -p "$PENDING" "$IN_PROGRESS" "$BLOCKED" "$DONE" "$LOG" "$WORKTREES" "$STATE_DIR"
 touch "$BACKOFF_FILE"
@@ -314,7 +315,7 @@ run_task_pipeline() {
   # whose acceptance criteria require hitting a live local service (e.g. docker-compose'd
   # containers) rather than a mock. Passed to every harness's harness_maker_run — only adapters
   # with an actual sandbox network toggle (codex's is the built-in example) honor it; others
-  # no-op. Scoped per-task, not global. This does not bypass the sensitive-path gate — a task can
+  # no-op. Scoped per-task, not global. This does not bypass the require-human-review path gate — a task can
   # be both network_access and sensitive, and still lands in blocked/ for human sign-off.
   network_access=$(sed -n 's/^network_access: *//p' "$task_file" | head -n1)
 
@@ -383,10 +384,10 @@ run_task_pipeline() {
 
     local diff_paths
     diff_paths=$(git -C "$worktree" diff --name-only "$BASE_BRANCH"...HEAD)
-    if echo "$diff_paths" | grep -qE "$SENSITIVE_PATTERN"; then
-      log "  $task_id: diff touches a sensitive path — skipping auto-review, blocking for human sign-off"
-      echo "$diff_paths" > "$task_log/sensitive-paths.txt"
-      outcome="blocked: touches a sensitive path"
+    if echo "$diff_paths" | grep -qE "$REQUIRE_HUMAN_REVIEW_PATHS"; then
+      log "  $task_id: diff matches LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS — skipping auto-review, blocking for human sign-off"
+      echo "$diff_paths" > "$task_log/require-human-review-paths.txt"
+      outcome="blocked: touches a path that always requires human review"
       break
     fi
 

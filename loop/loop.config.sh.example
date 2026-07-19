@@ -10,11 +10,11 @@
 LOOP_KIT_BUILD_CMD="make build"
 LOOP_KIT_TEST_CMD="make test"
 
-# Extended-regex of path prefixes whose diffs always route to loop/queue/blocked/ for a
-# human, regardless of what verify or the checker say — governance-sensitive changes
-# don't get to self-approve. Add your own ADRs / provider-interface specs / schema-of-
-# record files alongside the generic defaults below.
-LOOP_KIT_SENSITIVE_PATTERN='^(deploy/|secrets|\.github/workflows/)'
+# Extended regex of path prefixes that always require a human before merge. Matching diffs
+# skip the checker entirely and go to loop/queue/blocked/ — two models agreeing cannot
+# auto-merge these. (Older name LOOP_KIT_SENSITIVE_PATTERN is still read as a fallback;
+# install.sh --update renames it.)
+LOOP_KIT_REQUIRE_HUMAN_REVIEW_PATHS='^(deploy/|secrets|\.github/workflows/)'
 
 # Working-principles doc the task/review prompt templates point makers and reviewers at
 # (TDD requirement, architectural constraints, etc.). AGENTS.md is a common convention;

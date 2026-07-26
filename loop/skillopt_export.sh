@@ -115,21 +115,88 @@ def title_and_body(task_text: str) -> Tuple[str, str]:
 
 
 def latest_attempt(log_dir: Path) -> int:
+    # Generic on purpose: don't assume a single maker/reviewer file-naming convention here.
+    # run.sh implementations vary (some name files "<harness>-maker", some just "<harness>",
+    # some block before verify.txt ever gets written), so take the max attempt number across
+    # every "attempt-N-*" file in the dir rather than only recognizing one pattern.
     n = 0
-    for p in log_dir.glob("attempt-*-maker-*.log"):
-        m = re.match(r"attempt-(\d+)-maker-", p.name)
-        if m:
-            n = max(n, int(m.group(1)))
-    for p in log_dir.glob("attempt-*-verify.txt"):
-        m = re.match(r"attempt-(\d+)-verify", p.name)
+    for p in log_dir.iterdir():
+        if not p.is_file():
+            continue
+        m = re.match(r"^attempt-(\d+)-", p.name)
         if m:
             n = max(n, int(m.group(1)))
     return n
 
 
 def pick_one(log_dir: Path, pattern: str) -> Optional[Path]:
-    matches = sorted(log_dir.glob(pattern))
+    matches = sorted(p for p in log_dir.glob(pattern) if "prompt" not in p.name)
     return matches[-1] if matches else None
+
+
+# Maker/reviewer output filenames aren't standardized across run.sh implementations. The
+# original documented convention was "attempt-N-maker-<harness>.log" /
+# "attempt-N-review-<harness>.log" (see the --self-test fixtures below); observed real-world
+# loops instead write role-suffixed files per harness, e.g. "attempt-N-cursor-maker.jsonl",
+# "attempt-N-claude-maker.md", "attempt-N-codex-final.md" (codex's maker output has no "-maker"
+# suffix at all — its -o file is just "-final"), and "attempt-N-codex-review.md" /
+# "attempt-N-cursor-review.md" / "attempt-N-claude-review.md" for reviews. Try known real
+# filenames first (most specific/highest-signal), then fall back to the legacy glob so old
+# exports and the self-test fixtures below keep working unchanged.
+MAKER_CANDIDATES = [
+    "attempt-{a}-codex-final.md",
+    "attempt-{a}-claude-maker.md",
+    "attempt-{a}-cursor-maker.jsonl",
+    "attempt-{a}-codex.jsonl",
+]
+REVIEW_CANDIDATES = [
+    "attempt-{a}-codex-review.md",
+    "attempt-{a}-cursor-review.md",
+    "attempt-{a}-claude-review.md",
+    "attempt-{a}-codex-review.jsonl",
+]
+
+
+def _latest_by_suffixes(log_dir: Path, suffixes: List[str]) -> Optional[Path]:
+    # Some loops re-review the same committed diff across several attempt numbers without a
+    # new maker attempt in between (e.g. a maker commits once at attempt 1, then attempts 2-5
+    # are review-only retries), so the highest attempt number in the dir isn't necessarily the
+    # one carrying a maker file. Search every attempt for a known maker/review filename and
+    # take the highest-numbered match instead of insisting on an exact attempt-number hit.
+    best: Optional[Path] = None
+    best_n = -1
+    for p in log_dir.iterdir():
+        if not p.is_file():
+            continue
+        m = re.match(r"^attempt-(\d+)-(.+)$", p.name)
+        if not m:
+            continue
+        if m.group(2) in suffixes and int(m.group(1)) > best_n:
+            best_n = int(m.group(1))
+            best = p
+    return best
+
+
+def pick_maker_log(log_dir: Path, attempt: int) -> Optional[Path]:
+    for name in MAKER_CANDIDATES:
+        p = log_dir / name.format(a=attempt)
+        if p.is_file():
+            return p
+    legacy = pick_one(log_dir, f"attempt-{attempt}-maker-*.log")
+    if legacy:
+        return legacy
+    return _latest_by_suffixes(log_dir, [c.split("}-", 1)[1] for c in MAKER_CANDIDATES])
+
+
+def pick_review_log(log_dir: Path, attempt: int) -> Optional[Path]:
+    for name in REVIEW_CANDIDATES:
+        p = log_dir / name.format(a=attempt)
+        if p.is_file():
+            return p
+    legacy = pick_one(log_dir, f"attempt-{attempt}-review-*.log")
+    if legacy:
+        return legacy
+    return _latest_by_suffixes(log_dir, [c.split("}-", 1)[1] for c in REVIEW_CANDIDATES])
 
 
 def classify_outcome(outcome: str, bucket: str, verify_ok: Optional[bool]) -> str:
@@ -168,8 +235,8 @@ def build_task(task_id: str, log_dir: Path) -> Optional[Dict[str, Any]]:
         elif outcome == "approved" or bucket == "done":
             verify_ok = True
 
-    maker_log = pick_one(log_dir, f"attempt-{attempt}-maker-*.log") if attempt else None
-    review_log = pick_one(log_dir, f"attempt-{attempt}-review-*.log") if attempt else None
+    maker_log = pick_maker_log(log_dir, attempt) if attempt else None
+    review_log = pick_review_log(log_dir, attempt) if attempt else None
     fail_blob = ""
     for name in (
         f"attempt-{attempt}-verify.txt",

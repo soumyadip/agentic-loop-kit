@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KYRW2HPQ1PMA4AC5Y613TASX",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "README.md",
+    "loop/README.md",
+    "loop/council.sh",
+    "loop/council_synthesis_prompt.tpl.md",
+    "loop/pr_review_prompt.tpl.md",
+    "loop/queue_graph.sh",
+    "loop/review_prompt.tpl.md",
+    "loop/run.sh",
+    "skills/council/SKILL.md",
+    "skills/project-loop/SKILL.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1671,
+    "cache_creation_tokens": 689972,
+    "cache_read_tokens": 41993451,
+    "output_tokens": 155504,
+    "api_call_count": 208
+  }
+}

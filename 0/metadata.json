@@ -1,0 +1,105 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KYRW2HPQ1PMA4AC5Y613TASX",
+  "session_id": "969c901f-2be7-44f8-9dd3-1e5772fea44e",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-30T06:41:06.537219Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "save_step_count": 3,
+  "files_touched": [
+    "README.md",
+    "loop/README.md",
+    "loop/council.sh",
+    "loop/council_synthesis_prompt.tpl.md",
+    "loop/pr_review_prompt.tpl.md",
+    "loop/queue_graph.sh",
+    "loop/review_prompt.tpl.md",
+    "loop/run.sh",
+    "skills/council/SKILL.md",
+    "skills/project-loop/SKILL.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "2afabf40ae49",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 1671,
+    "cache_creation_tokens": 689972,
+    "cache_read_tokens": 41993451,
+    "output_tokens": 155504,
+    "api_call_count": 208
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-30T06:41:06.421285Z",
+    "agent_lines": 695,
+    "agent_removed": 45,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 695,
+    "total_lines_changed": 740,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 653,
+      "user_lines_removed": 0,
+      "agent_lines_added": 618,
+      "agent_lines_removed": 37,
+      "user_added_per_file": {
+        ".claude/settings.json": 84,
+        ".codex/config.toml": 3,
+        ".codex/hooks.json": 52,
+        ".cursor/hooks.json": 40,
+        ".gemini/settings.json": 141,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 272
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 653,
+      "user_lines_removed": 0,
+      "agent_lines_added": 685,
+      "agent_lines_removed": 40,
+      "user_added_per_file": {
+        ".claude/settings.json": 84,
+        ".codex/config.toml": 3,
+        ".codex/hooks.json": 52,
+        ".cursor/hooks.json": 40,
+        ".gemini/settings.json": 141,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 272
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 653,
+      "user_lines_removed": 0,
+      "agent_lines_added": 695,
+      "agent_lines_removed": 45,
+      "user_added_per_file": {
+        ".claude/settings.json": 84,
+        ".codex/config.toml": 3,
+        ".codex/hooks.json": 52,
+        ".cursor/hooks.json": 40,
+        ".gemini/settings.json": 141,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 272
+      }
+    }
+  ]
+}

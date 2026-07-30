@@ -1,0 +1,5 @@
+let's do the docs and glossary first, then the zone/domain reviewer routing
+
+---
+
+do another pass of the documentation using the persona of an inexperienced developer to make sure it is simple and easy-to-understand

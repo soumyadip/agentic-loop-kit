@@ -74,18 +74,38 @@ for (( i = 0; i < ${#HARNESSES[@]}; i++ )); do
   done
 done
 
-# Prints the reviewer for maker $1: the next member after it in the HARNESSES ring, wrapping
-# around.
+# Prints the reviewer for maker $1: normally the next member after it in the HARNESSES ring,
+# wrapping around. If that primary reviewer's harness is currently in a recorded backoff window
+# (see is_backed_off, defined below — bash resolves this at call time, so the forward reference
+# is fine), walk the rest of the ring instead, skipping the maker itself, for the first member
+# whose harness isn't backed off. One rate-limited reviewer used to block every task made by the
+# member right before it in the ring even when other healthy members existed to check it; now it
+# only does that once every *other* member is also backed off, in which case there's nothing
+# better to try and this falls through to the plain next-in-ring pick (letting the actual review
+# call hit the limit and (re-)record backoff, same as before this fallback existed).
 reviewer_for() {
-  local maker="$1" i n
+  local maker="$1" i n start idx candidate primary
   n=${#HARNESSES[@]}
+  start=-1
   for (( i = 0; i < n; i++ )); do
-    if [[ "${HARNESSES[$i]}" == "$maker" ]]; then
-      echo "${HARNESSES[$(( (i + 1) % n ))]}"
+    if [[ "${HARNESSES[$i]}" == "$maker" ]]; then start=$i; break; fi
+  done
+  (( start == -1 )) && start=0  # maker not in HARNESSES — shouldn't happen, task_maker validates against it
+  primary="${HARNESSES[$(( (start + 1) % n ))]}"
+  if ! is_backed_off "$(member_harness "$primary")"; then
+    echo "$primary"
+    return 0
+  fi
+  for (( i = 2; i < n; i++ )); do
+    idx=$(( (start + i) % n ))
+    candidate="${HARNESSES[$idx]}"
+    if ! is_backed_off "$(member_harness "$candidate")"; then
+      echo "[loop] $maker's primary reviewer ($primary) is backed off — using $candidate instead" >&2
+      echo "$candidate"
       return 0
     fi
   done
-  echo "${HARNESSES[0]}"  # maker not in HARNESSES — shouldn't happen, task_maker validates against it
+  echo "$primary"  # every other member is backed off too — nothing healthier to fall back to
 }
 
 # How many distinct attempts a reviewer makes to actively break the maker's diff during its
@@ -391,10 +411,12 @@ run_task_pipeline() {
       break
     fi
 
-    # Reviewer is the next member after $maker in the HARNESSES ring (see reviewer_for() near
-    # the top of this file) — generalizes what used to be a fixed codex->claude->cursor->codex
+    # Reviewer is normally the next member after $maker in the HARNESSES ring (see reviewer_for()
+    # near the top of this file) — generalizes what used to be a fixed codex->claude->cursor->codex
     # cycle to any ordered list of >=2 configured members, including several members that share
-    # one multi-model harness.
+    # one multi-model harness. reviewer_for() also falls back to a later ring member when the
+    # primary one is backed off, so a single rate-limited harness doesn't block every task by
+    # itself.
     local reviewer; reviewer=$(reviewer_for "$maker")
     local reviewer_harness; reviewer_harness=$(member_harness "$reviewer")
     local reviewer_model; reviewer_model=$(member_model "$reviewer")

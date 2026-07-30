@@ -19,6 +19,37 @@ your `$PATH`.
 - Principles + roadmap docs
 - Which harnesses/models sit in the maker/checker ring
 
+## Quickstart
+
+New to this kit? The five-minute version (each step links to the section
+with the full detail):
+
+1. Pick **2+ CLIs** from the [Prerequisites](#prerequisites) table below,
+   install them, and log in to each (one-time, e.g. `codex login` — see the
+   table's Auth column).
+2. `./install.sh /path/to/your-repo` and answer the prompts (or
+   `--non-interactive` with flags — see `./install.sh --help`).
+3. `cd /path/to/your-repo`, seed one task:
+   `loop/new_task.sh my-first-task <milestone>`, then open the file it wrote
+   under `loop/queue/pending/` and replace every `TODO:` (see
+   [`loop/README.md`](loop/README.md)'s "Adding tasks" — it includes a
+   worked example).
+4. Run it, one task, supervised:
+   `LOOP_MAX_ITERATIONS=1 ./loop/run.sh`.
+5. Check the result: `loop/queue/done/` (merged) or `loop/queue/blocked/`
+   (needs you — see `loop/README.md`'s "When a task is blocked"), and read
+   `loop/log/<task-id>/` for the full maker/checker transcript.
+
+**This costs real usage.** Each task run makes several genuine model calls —
+at minimum one maker attempt and one checker review, more on retries —
+through whichever CLI subscriptions or API keys you configured. It is not
+free or instant. Keep `LOOP_MAX_ITERATIONS` small (`1`–`3`) until you trust
+the setup; see `loop/README.md`'s "What this does not do."
+
+New to terms like *maker*, *checker*, *harness*, *ring*, or *worktree*?
+[`loop/README.md`](loop/README.md) opens with a short glossary — worth
+reading once before the reference tables below.
+
 ## Harnesses (and models) are pluggable
 
 Which CLIs — and which models — act as maker and checker is **data**, not
@@ -57,15 +88,16 @@ opinions, no ring, no ≥2 rule — the two lists need not match.
 
 ## Prerequisites
 
-Install and authenticate only the CLIs you put in your rotation:
+Install and authenticate only the CLIs you put in your rotation. Auth is a
+one-time interactive step per CLI, done once per machine:
 
-| CLI | Role |
-|---|---|
-| [`codex`](https://github.com/openai/codex) | Built-in maker/checker/council |
-| [`claude`](https://claude.com/claude-code) | Built-in maker/checker/council |
-| [`cursor-agent`](https://cursor.com/cli) | Built-in maker/checker/council (multi-model) |
-| [`copilot`](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) | Built-in maker/checker/council (multi-model; GitHub Copilot subscription) |
-| [`opencode`](https://opencode.ai) | Built-in maker/checker/council (multi-model; also default council member) |
+| CLI | Role | Auth |
+|---|---|---|
+| [`codex`](https://github.com/openai/codex) | Built-in maker/checker/council | `codex login` (ChatGPT account) or `OPENAI_API_KEY` |
+| [`claude`](https://claude.com/claude-code) | Built-in maker/checker/council | Run `claude`, follow the browser login prompt (or `ANTHROPIC_API_KEY`) |
+| [`cursor-agent`](https://cursor.com/cli) | Built-in maker/checker/council (multi-model) | `cursor-agent login` (or `CURSOR_API_KEY`) |
+| [`copilot`](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) | Built-in maker/checker/council (multi-model; GitHub Copilot subscription) | Run `copilot`, follow the login prompt (needs an active Copilot subscription) |
+| [`opencode`](https://opencode.ai) | Built-in maker/checker/council (multi-model; also default council member) | `opencode auth login` (pick a provider, e.g. `-p anthropic`) |
 
 Also required: `python3`, `git` (worktrees — load-bearing), `bash` 4+.
 
@@ -101,6 +133,12 @@ Prompts below (or hand-edit `loop/loop.config.sh` anytime). Full flags:
 `./install.sh --help`.
 
 ### Require-human-review paths (not “sensitive”)
+
+**Decision rule:** a recurring directory (deploy, secrets, CI) → the regex
+gate. A one-off task that isn't under such a path → `sensitive: true` in
+that task's frontmatter. Both produce the identical outcome (always block
+for a human); the rest of this section is about *why* there are two knobs,
+not which one to reach for.
 
 Two related knobs — easy to confuse; only the regex is a gate:
 
@@ -164,7 +202,8 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
   render.sh                  shared template renderer, sourced by run.sh and review_pr.sh
   verify.sh                 the automated gate
   review_pr.sh               review a GitHub PR through the same checker machinery
-  council.sh                the independent multi-model advisory fan-out
+  council.sh                the independent multi-model advisory fan-out (+ optional --synthesize)
+  queue_graph.sh             prints the depends_on task DAG (text or --mermaid)
   new_task.sh                scaffolds a new queue task file
   new_harness.sh             scaffolds a new loop/harnesses/<name>.sh adapter
   skillopt_export.sh         export loop/log + queue outcomes → SkillOpt-Sleep tasks JSON
@@ -178,6 +217,7 @@ loop/                       copied into a target repo's loop/ verbatim (post-sub
   pr_review_prompt.tpl.md     review prompt for review_pr.sh
   review_mandate.partial.md   shared red-team / verdict block (injected into both review templates)
   council_prompt.tpl.md      council member prompt template
+  council_synthesis_prompt.tpl.md   council.sh --synthesize's prompt
   harnesses/
     codex.sh, claude.sh, cursor.sh   built-in maker/checker/council adapters
     copilot.sh, opencode.sh          multi-model maker/checker/council adapters
@@ -214,3 +254,29 @@ repo is yours.
 
 Use `--force` only when you intentionally want a regenerated config (then
 restore tuned settings from git).
+
+## Loop, or graph? (skip this if you're just getting started)
+
+Nothing above requires reading this — it only matters if the term "graph
+engineering" ([Peter Steinberger](https://x.com/steipete) framing it as
+loop engineering's successor, mid-2026) means something to you already and
+you're wondering how this kit relates. Short version: this kit's *unit* is
+still a loop — one maker, one checker, one stop condition — but the pieces
+around that unit already compose into a graph, not a single chain:
+
+| Graph-engineering term | What it is here |
+|---|---|
+| **Node** | Each maker/checker/council call is a separate node: its own prompt template, fresh context (no contamination from the prior call's transcript), isolated `git worktree`. |
+| **Edge / explicit routing** | Not emergent from one agent's judgment — `reviewer_for()` in `run.sh` and the adjudication table (`approve` / `request_changes` / `block_human`) are plain, inspectable, config-driven routing. |
+| **State handoff, not raw transcript** | A checker gets the task file (Why/Scope/Acceptance) plus the diff — a defined handoff schema, never the maker's raw conversation. |
+| **Task graph (DAG)** | `depends_on:` frontmatter across `loop/queue/*/`, visualized with `loop/queue_graph.sh`. |
+| **Fan-out / fan-in** | Fan-out: parallel maker lanes per turn, and `council.sh`'s parallel dispatch. Fan-in: a `depends_on: [A, B]` task joining after *both* land in `done/`, and `council.sh --synthesize` reconciling N independent opinions into one. |
+| **Policy node** | `verify.sh` and the require-human-review path gate both run *before* the checker and can route straight to `blocked/` without any model in the loop. |
+| **Failure isolation** | A backed-off checker no longer stalls the whole task — `reviewer_for()` tries the next healthy ring member first. |
+
+We considered renaming the kit to chase the new vocabulary and decided
+against it: "loop" still accurately names the atomic unit (maker → checker
+→ stop condition) that every graph-shaped piece above is *built from*, not
+a replacement for — and a term barely a few weeks old is a shaky
+foundation for a name that has to outlive its own hype cycle. This section
+exists so the mapping is on record instead.

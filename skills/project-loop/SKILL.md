@@ -50,6 +50,9 @@ when consolidating — all-failure pools produce worse skills.
   the task in a different shape unless the failure shows the approach was wrong.
 - Reviewers: run the adversarial mandate for real; confirmed high/critical bugs →
   `request_changes`. Unconfirmed or low/medium → `block_human`, not silent approve.
+- Reviewers: judge test quality, not just presence — loose/tautological assertions,
+  missing edge cases, or tests pinned to implementation details are a
+  `request_changes`, named specifically, same as a missing test.
 
 ## Around-loop helpers
 

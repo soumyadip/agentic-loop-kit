@@ -35,12 +35,18 @@ what "good" looks like.
    opencode claude`); read `loop/council.sh`'s own usage header for the
    current env vars (`COUNCIL_SKIP` to skip specific members for one run,
    per-harness `LOOP_KIT_<NAME>_COUNCIL_MODEL`/`LOOP_KIT_COUNCIL_TIMEOUT`
-   in `loop.config.sh.example`) if you need to tune it.
+   in `loop.config.sh.example`) if you need to tune it. Add `--synthesize`
+   (optionally `--synthesizer MEMBER` to pick who) to have one more member
+   write `synthesis.md` in the output dir automatically — still worth a
+   skeptical read, not a substitute for step 3 below, just a head start.
 
 3. Once notified, read the output files it reports (one per configured
-   member) and synthesize: note where members converged unprompted
-   (strongest signal), make an explicit call wherever they split and say
-   why, and present the synthesis compactly before writing anything into
-   the project's own docs/specs. Only write those files if asked to, or
-   after the user confirms the synthesis — a council run that only
-   informs the conversation is a valid outcome on its own.
+   member — plus `synthesis.md` if you passed `--synthesize`) and
+   synthesize: note where members converged unprompted (strongest signal),
+   make an explicit call wherever they split and say why, and present the
+   synthesis compactly before writing anything into the project's own
+   docs/specs. Sanity-check an automated `synthesis.md` against the raw
+   per-member files the same way you'd sanity-check your own reading of
+   them — it's one more model's take, not ground truth. Only write those
+   files if asked to, or after the user confirms the synthesis — a council
+   run that only informs the conversation is a valid outcome on its own.
